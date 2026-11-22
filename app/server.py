@@ -38,7 +38,9 @@ import gateway
 import rea
 import catalog
 import media
+import nettls
 import sprites
+import strata
 import websearch
 
 # LLM_HOME: pasta de dados (modelos, motor, conversas). O app desktop define isso.
@@ -211,7 +213,14 @@ class _Redirect(urllib.request.HTTPRedirectHandler):
         return new
 
 
-OPENER = urllib.request.build_opener(_Redirect)
+class _Opener:
+    """Downloads da internet: HTTPS com a lista de certificados do nettls (corrige o CERTIFICATE_VERIFY_FAILED)."""
+
+    def open(self, req, timeout=30):
+        return nettls.urlopen(req, timeout=timeout, handlers=(_Redirect,))
+
+
+OPENER = _Opener()
 
 
 def make_request(url, headers=None):
@@ -444,7 +453,8 @@ def vram_guard():
     if gpu_extras:
         POOL.stop_device("gpu")
         what = "os modelos extras da GPU (" + ", ".join(model_display(m) for m in gpu_extras) + ")"
-    elif ENGINE_PROC.state in ("ready", "loading") and ENGINE_PROC.device == "gpu":
+    elif ENGINE_PROC.state in ("ready", "loading") and ENGINE_PROC.device == "gpu" and ENGINE_PROC.backend != "strata":
+        # o Strata ocupa a placa de proposito (e usa a RAM e o SSD pelo proprio plano de memoria): nao e travamento
         what = "o modelo principal (" + model_display(ENGINE_PROC.model) + ")"
         ENGINE_PROC.stop()
     else:
@@ -712,12 +722,17 @@ class EngineProcess:
         self.log = deque(maxlen=400)
         self.lock = threading.Lock()
         self.job = _job_object()
+        self._strata_gen = 0
 
     def stop(self):
         with self.lock:
             p, self.proc = self.proc, None
+            was_strata = self.backend == "strata" and self.state != "stopped"
             self.state, self.model, self.error = "stopped", "", ""
             self.n_ctx = 0  # nao mostrar o contexto da carga anterior
+            self._strata_gen = getattr(self, "_strata_gen", 0) + 1  # cancela um `strata launch` em andamento
+        if was_strata:
+            strata.stop()  # o servidor do Strata roda separado: `strata launch --stop`
         if p and p.poll() is None:
             p.terminate()
             try:
@@ -727,6 +742,8 @@ class EngineProcess:
 
     def start(self, model_rel, s, device=None, embed=False, no_mtp=False, ctx=None):
         """ctx: contexto ja ajustado (nova tentativa depois de faltar memoria); None = o das configuracoes."""
+        if strata.parse_id(model_rel):
+            return self.start_strata(model_rel, s.get("strata_context", ""))
         self._args = (model_rel, dict(s), device, embed, no_mtp)
         if not no_mtp:
             self.mtp_error = False
@@ -804,6 +821,44 @@ class EngineProcess:
         threading.Thread(target=self._read_output, args=(proc,), daemon=True).start()
         threading.Thread(target=self._wait_ready, args=(proc,), daemon=True).start()
 
+    def start_strata(self, model_rel, context=""):
+        """Motor Strata: `strata launch` sobe o servidor dele nesta mesma porta; o resto do app nao percebe a troca."""
+        if self is not ENGINE_PROC:
+            raise ValueError("O Strata roda só como modelo principal.")
+        family, model = strata.parse_id(model_rel)
+        strata.launch_args(family, model, self.port, context)  # valida antes de parar o modelo atual
+        if not strata.cli_path():
+            raise ValueError("O Strata não está instalado. Vá em Modelos → Runtime e instale o Strata.")
+        self.stop()
+        POOL.stop()  # o Strata usa a placa toda: libera os modelos extras do llama.cpp
+        with self.lock:
+            gen = self._strata_gen
+            self.model, self.backend, self.state, self.error = model_rel, "strata", "loading", ""
+            self.mtp, self.mtp_error, self.accel, self.device = False, False, "", "gpu"
+            self.notice, self.ctx_requested, self.modalities = "", 0, {}
+        self.log.clear()
+        self.log.append(f"> strata {' '.join(strata.launch_args(family, model, self.port, context))}")
+        self.log.append("[Arasaka Mikoshi] Na primeira vez o Strata baixa o motor da placa e o modelo (pode levar bastante tempo).")
+
+        def run():
+            try:
+                res = strata.launch(family, model, self.port, context, on_line=self.log.append,
+                                    should_stop=lambda: self._strata_gen != gen)
+                for n in res.get("notices") or []:
+                    self.log.append(f"[Strata] {n}")
+                if self._strata_gen != gen:
+                    return
+                self.n_ctx, self.modalities = self._read_props()
+                self.state = "ready"
+                diag_log(f"Strata pronto: {model_rel} na porta {self.port}")
+            except Exception as e:  # noqa: BLE001
+                if self._strata_gen != gen:
+                    return
+                self.log.append(str(e))
+                self.state, self.error = "error", str(e)
+                diag_log(f"Strata falhou ao iniciar {model_rel}: {e}")
+        threading.Thread(target=run, daemon=True).start()
+
     def _read_output(self, proc):
         for raw in iter(proc.stdout.readline, b""):
             self.log.append(raw.decode("utf-8", "replace").rstrip())
@@ -863,6 +918,7 @@ class EngineProcess:
         if self.state == "ready" and self.proc and self.proc.poll() is not None:
             self.state, self.error = "error", "O motor fechou inesperadamente (veja o log)."
         return {"state": self.state, "model": self.model, "backend": self.backend, "error": self.error,
+                "label": strata.label(self.model) if self.backend == "strata" else "",
                 "port": self.port, "n_ctx": self.n_ctx, "ctx_requested": self.ctx_requested, "notice": self.notice,
                 "mtp": self.mtp, "mtp_error": self.mtp_error, "accel": self.accel,
                 "vision": self.state == "ready" and self.modalities.get("vision", False),
@@ -873,6 +929,8 @@ ENGINE_PROC = EngineProcess()
 
 
 def model_display(rel):
+    if strata.parse_id(rel):
+        return strata.label(rel)
     return Path(rel).stem if rel else "modelo principal"
 
 
@@ -1720,6 +1778,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send_json(diag_snapshot())
             if p == "/api/log":
                 return self.send_json({"log": list(ENGINE_PROC.log)})
+            if p == "/api/strata":
+                return self.send_json(strata.status())
             if p == "/api/agents":
                 return self.send_json(agents.load())
             if p == "/api/mcp":
@@ -2018,6 +2078,18 @@ class Handler(BaseHTTPRequestHandler):
                 t = new_task("engine", f"Motor llama.cpp ({backend.upper()})")
                 run_task(t, lambda task: install_engine(task, backend))
                 return self.send_json({"id": t["id"]})
+            if p == "/api/strata/install":
+                if any(t["kind"] == "engine" and t["status"] == "running" for t in public_tasks()):
+                    return self.send_json({"error": "espere a instalação em andamento terminar"}, 409)
+                t = new_task("engine", "Motor Strata")
+                run_task(t, strata.install)
+                return self.send_json({"id": t["id"]})
+            if p == "/api/strata/launch":
+                rel = strata.model_id(str(b.get("family", "")).strip().lower(), str(b.get("model", "")).strip().lower())
+                if not strata.parse_id(rel):
+                    return self.send_json({"error": "modelo do Strata inválido"}, 400)
+                ENGINE_PROC.start_strata(rel, str(b.get("context", "") or ""))
+                return self.send_json({"ok": True, "model": rel})
             if p == "/api/models/download":
                 repo, path = b.get("repo", ""), b.get("path", "")
                 if not re.match(r"^[\w.-]+/[\w.-]+$", repo) or ".." in path:

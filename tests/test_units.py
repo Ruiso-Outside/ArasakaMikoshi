@@ -367,3 +367,77 @@ class McpHelpers(TempDirCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class NetTls(unittest.TestCase):
+    """CERTIFICATE_VERIFY_FAILED: atualiza a lista do Windows e tenta de novo; senao, mensagem que diz o que fazer."""
+
+    def setUp(self):
+        import nettls
+        self.nettls = nettls
+        self._orig = (nettls.opener, nettls.warm_windows_roots)
+
+    def tearDown(self):
+        self.nettls.opener, self.nettls.warm_windows_roots = self._orig
+        self.nettls.reset()
+
+    def _fake(self, fails):
+        import ssl
+        import urllib.error
+        calls = []
+
+        class Op:
+            def open(self, req, timeout=30):
+                calls.append(req)
+                if len(calls) <= fails:
+                    raise urllib.error.URLError(ssl.SSLCertVerificationError(1, "[SSL: CERTIFICATE_VERIFY_FAILED] unable to get local issuer certificate"))
+                return "ok"
+        self.nettls.opener = lambda *h: Op()
+        return calls
+
+    def test_retries_after_warming_windows_roots(self):
+        calls = self._fake(fails=1)
+        warmed = []
+        self.nettls.warm_windows_roots = lambda url: warmed.append(url) or True
+        self.assertEqual(self.nettls.urlopen("https://github.com/x", timeout=5), "ok")
+        self.assertEqual((len(calls), warmed), (2, ["https://github.com/x"]))
+
+    def test_friendly_error_when_still_failing(self):
+        self._fake(fails=9)
+        self.nettls.warm_windows_roots = lambda url: True
+        with self.assertRaises(self.nettls.CertificateError) as cm:
+            self.nettls.urlopen("https://github.com/x", timeout=5)
+        self.assertIn("github.com", str(cm.exception))
+        self.assertNotIn("CERTIFICATE_VERIFY_FAILED", str(cm.exception))
+
+    def test_other_errors_pass_through(self):
+        import urllib.error
+
+        class Op:
+            def open(self, req, timeout=30):
+                raise urllib.error.URLError(ConnectionRefusedError())
+        self.nettls.opener = lambda *h: Op()
+        with self.assertRaises(urllib.error.URLError) as cm:
+            self.nettls.urlopen("https://github.com/x", timeout=5)
+        self.assertNotIsInstance(cm.exception, self.nettls.CertificateError)
+
+
+class StrataModule(unittest.TestCase):
+    def test_ids_and_args(self):
+        import strata
+        self.assertEqual(strata.parse_id("strata:qwen/q2_0"), ("qwen", "q2_0"))
+        self.assertIsNone(strata.parse_id("Qwen3-8B.gguf"))
+        self.assertIsNone(strata.parse_id("strata:qw en/q2_0"))
+        args = strata.launch_args("qwen36", "ud-q4_k_xl", 8766, "128k")
+        for flag in ("--no-tui", "--yes", "--output", "--access", "--restart"):
+            self.assertIn(flag, args)
+        self.assertEqual(args[args.index("--port") + 1], "8766")
+        with self.assertRaises(ValueError):
+            strata.launch_args("qwen", "q2_0 --access lan", 8766)
+        with self.assertRaises(ValueError):
+            strata.launch_args("qwen", "q2_0", 8766, "muito")
+
+    def test_reads_last_json_line(self):
+        import strata
+        self.assertEqual(strata._json_line('Baixando...\n{"ok": true, "urls": ["x"]}\n'), {"ok": True, "urls": ["x"]})
+        self.assertIsNone(strata._json_line("sem json"))

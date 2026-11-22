@@ -171,6 +171,12 @@ O [REA](https://github.com/morluto/rea) faz parte do motor: o Codex passa a ente
 - **No Codex:** com uma pasta de projeto, o Codex usa o REA pelo terminal com a saída limitada (`--token-limit`), sem gastar contexto com as 207 ferramentas dele. Dá para desligar em Configurações → Codex.
 - **Como ferramentas MCP (opcional):** Configurações → Ferramentas MCP → **+ REA (MCP)** usa a mesma cópia local. O perfil **Essenciais** liga 8 ferramentas (~4,4 mil tokens) e **Windows completo**, 18. Em cada servidor MCP dá para ligar e desligar ferramentas uma a uma.
 
+### 🧱 Strata (motor alternativo)
+O [Strata](https://github.com/Niko1221/Strata) (open source, licença MIT) é um motor com modelos próprios — **Qwen3.8-Flash-Next** (ISTA-DASLab, Coder, Unsloth, Gyro) e **Qwen3.6-35B-A3B** — que usam a placa de vídeo, a RAM e o SSD juntos.
+- **Instalar:** Modelos → Runtime → **Instalar o Strata**. Roda o instalador oficial da última versão (confere a assinatura do pacote, não pede administrador) e instala o comando `strata` em `%LOCALAPPDATA%\Strata` (Linux: `~/.local/share/strata`).
+- **Usar:** escolha a família, o modelo e o contexto e clique em **Iniciar com o Strata**. A Mikoshi roda `strata launch` na porta do motor dela e só neste PC (127.0.0.1): o chat, o Codex e os agentes passam a usar o Strata sem mudar mais nada. Na primeira vez o Strata baixa o motor da sua placa e o modelo (dezenas de GB); o progresso aparece no log do runtime.
+- **Parar:** **Parar o Strata** (ou carregar um modelo GGUF, que volta para o llama.cpp). Enquanto o Strata roda, os modelos extras do llama.cpp são descarregados e a proteção de VRAM não age sobre ele (ele ocupa a placa de propósito).
+
 ### 🎨 Imagem
 Descreva a imagem (em português mesmo). O modelo de texto carregado melhora a descrição antes de gerar.
 - Instale em **Modelos → Mídia**: o motor (*stable-diffusion.cpp*; Vulkan é o recomendado) e um modelo: **Z-Image Turbo** (melhor qualidade, ~6 GB) ou **SDXL Turbo** (mais rápido). Para pixel art, use o setor **👾 Sprites**.
@@ -247,6 +253,7 @@ Em **Modelos → Meus modelos → ⚙️**, cada modelo pode ter contexto, camad
 ## Travamentos e diagnóstico 🩺
 - **Contexto maior que a placa aguenta:** se o contexto das configurações não cabe na memória de vídeo (ou passa do máximo do modelo, lido do próprio arquivo GGUF), a Mikoshi reduz o contexto até caber, carrega o modelo e avisa quanto usou. As configurações não mudam: ajuste em Configurações → Modelo e runtime para não esperar as tentativas. Até a 1.29.0, com um contexto grande demais (ex.: 720000), o modelo dava erro ao ser carregado de novo depois de descarregado.
 
+- **Erro `CERTIFICATE_VERIFY_FAILED` ao baixar o motor ou um modelo:** o Windows completa a lista de certificados raiz aos poucos, e num PC novo o Python não conseguia conferir o GitHub. Agora a Mikoshi pede ao próprio Windows para atualizar a lista e tenta de novo (a verificação nunca é desligada). Se ainda falhar, por causa de um antivírus ou proxy que inspeciona o HTTPS, a mensagem diz o que fazer.
 - **Servidor interno:** se ele parar, o app reinicia sozinho (antes, uma caixa de erro travava o app inteiro até alguém clicar nela, mesmo escondida atrás das janelas).
 - **Memória da placa de vídeo:** se ela encher (ex.: um jogo aberto junto com um modelo grande), o Windows passa a usar a RAM como memória de vídeo e tudo fica lento.
 - O topo mostra a VRAM real (🎮) e avisa quando ela enche.
@@ -312,6 +319,8 @@ Em **Configurações → Idioma** escolha a língua do app: **Português (Brasil
 | `app/train.py` | Fine-tuning: ambiente, datasets, runs e exportação |
 | `app/train_worker.py` | Treino LoRA/QLoRA e exportação para GGUF (roda no Python do treino) |
 | `app/gateway.py` | API local compatível com Ollama e OpenAI para outros programas |
+| `app/nettls.py` | HTTPS que funciona em mais PCs: lista de certificados do sistema (+ certifi) e nova tentativa no Windows |
+| `app/strata.py` | Motor Strata: instala o Strata Terminal, inicia e para os modelos pelo `strata launch` |
 | `app/rea.py` | REA no motor: instala o Node.js portátil e o rea-agents e monta as instruções do Codex |
 | `app/mcp.py` | Cliente MCP: conecta o Codex e os agentes a programas como o Roblox Studio; acha e conecta sozinho o Arasaka Construct |
 | `app/mcpdocs.py` | Documentação dos servidores MCP no prompt: lê o recurso, divide pelos títulos e busca os trechos do pedido (BM25 + sinônimos) |

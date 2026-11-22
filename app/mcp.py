@@ -20,6 +20,8 @@ import urllib.request
 from collections import deque
 from pathlib import Path
 
+import nettls
+
 PROTOCOL = "2025-06-18"
 CLIENT_INFO = {"name": "Arasaka Mikoshi", "version": "1"}
 NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
@@ -428,9 +430,11 @@ class HttpClient:
             headers["Mcp-Session-Id"] = self.session
         req = urllib.request.Request(self.cfg["url"], data=json.dumps(obj).encode("utf-8"), headers=headers)
         try:
-            return urllib.request.urlopen(req, timeout=timeout)
+            return nettls.urlopen(req, timeout=timeout)
         except urllib.error.HTTPError as e:
             raise MCPError(f"HTTP {e.code}: {e.reason}") from e
+        except nettls.CertificateError as e:
+            raise MCPError(str(e)) from e
         except (urllib.error.URLError, OSError) as e:
             raise MCPError(f"Sem conexão com {self.cfg['url']}: {e}") from e
 

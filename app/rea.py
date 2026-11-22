@@ -11,9 +11,10 @@ import re
 import shutil
 import subprocess
 import time
-import urllib.request
 import zipfile
 from pathlib import Path
+
+import nettls
 
 REA_VERSION = "6.5.0"  # versao testada; atualizar aqui de proposito (o REA muda rapido)
 NODE_MAJOR = 24  # o REA pede Node 22.19+, 24.11+ ou 26+
@@ -99,7 +100,7 @@ def install(task):
         name = f"node-{ver}-{'win' if WIN else 'linux'}-x64"
         ext = ".zip" if WIN else ".tar.xz"
         base = f"https://nodejs.org/dist/{ver}/"
-        with urllib.request.urlopen(base + "SHASUMS256.txt", timeout=30) as r:
+        with nettls.urlopen(base + "SHASUMS256.txt", timeout=30) as r:
             sums = r.read().decode("utf-8", "replace")
         m = re.search(rf"^([0-9a-f]{{64}})\s+{re.escape(name + ext)}$", sums, re.M)
         if not m:

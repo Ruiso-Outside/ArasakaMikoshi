@@ -25,7 +25,7 @@ function toast(msg, ms = 2600) {
   const el = $("#toast"); el.textContent = trText(msg); el.classList.add("show");
   clearTimeout(toastTimer); toastTimer = setTimeout(() => el.classList.remove("show"), ms);
 }
-const modelName = () => (S.status.models.find(m => m.path === S.status.engine.model) || {}).name || "";
+const modelName = () => (S.status.models.find(m => m.path === S.status.engine.model) || {}).name || S.status.engine.label || "";
 const extLang = p => ((p || "").split(".").pop() || "").toLowerCase();
 const baseName = p => (p || "").split(/[\\/]/).pop();
 
@@ -54,7 +54,7 @@ async function refreshStatus() {
   // recarrega o status de mídia quando uma instalação termina
   const finished = S.status.tasks.filter(t => t.status === "done" && !S.doneTasks.has(t.id));
   finished.forEach(t => S.doneTasks.add(t.id));
-  if (finished.length) { loadMedia(); loadKbs(); }
+  if (finished.length) { loadMedia(); loadKbs(); loadStrata(); }
   const lang = S.status.settings.language;
   if (LANG_LOCKED) { if (lang !== LANG && !S.langSynced) { S.langSynced = true; api("/api/settings", { method: "PUT", body: { language: LANG } }).catch(() => {}); } }
   else if (lang && lang !== LANG && !S.generating) return setLanguage(lang);
@@ -88,7 +88,7 @@ function renderTopbar() {
   const name = modelName() || e.model;
   const caps = (e.vision ? " · " + t("👁 visão") : "") + (e.audio ? " · 🎧 " + t("Áudio").toLowerCase() : "");
   const map = { stopped: [t("Nenhum modelo carregado"), ""], loading: [t("Carregando {name}...", { name }), "loading"],
-                ready: [(e.mtp_error ? "⚠ " : "") + "● " + name + (e.backend ? ` · ${e.backend.toUpperCase()}` : "") + (e.mtp ? " · ⚡ " + accelLabel(e.accel) : "") + caps, "ready"], error: [t("Erro no runtime (clique)"), "error"] };
+                ready: [(e.mtp_error ? "⚠ " : "") + "● " + name + (e.backend && e.backend !== "strata" ? ` · ${e.backend.toUpperCase()}` : "") + (e.mtp ? " · ⚡ " + accelLabel(e.accel) : "") + caps, "ready"], error: [t("Erro no runtime (clique)"), "error"] };
   const extras = (st.extras || []).filter(x => x.state === "ready" || x.state === "loading");
   pill.textContent = map[e.state][0] + (extras.length ? ` · +${extras.length} extra${extras.length > 1 ? "s" : ""}` : "");
   if (e.state === "stopped" && extras.length) { pill.textContent = t("● {n} modelo(s) extra(s)", { n: extras.length }); pill.className = "pill ready"; }
@@ -1136,10 +1136,43 @@ function renderEngine() {
     <button class="btn small ${b[id] ? "" : "primary"}" data-install="${id}" ${running ? "disabled" : ""}>${b[id] ? "Atualizar" : "Instalar"}</button></div>`;
   const html = `<p>${g.name ? `GPU detectada: <b>${esc(g.name)}</b> (${(g.vram_mb / 1024).toFixed(0)} GB VRAM)` : "Nenhuma GPU NVIDIA detectada."}</p>
     <div class="engine-card">${box("cuda", "CUDA", "Para placas NVIDIA. O mais rápido.")}${box("vulkan", "Vulkan", "Funciona em NVIDIA, AMD e Intel.")}${box("cpu", "CPU", "Sem GPU. Lento, mas funciona em qualquer PC.")}</div>
+    ${strataBoxHTML(running)}
     ${st.engine.error ? `<div class="msg" style="padding:0;max-width:none"><div class="err">${esc(st.engine.error)}</div></div>` : ""}
     ${reaBoxHTML(running)}`;
   if ($("#engineInfo").dataset.sig !== html) { $("#engineInfo").innerHTML = html; $("#engineInfo").dataset.sig = html; }
 }
+// Strata (github.com/Niko1221/Strata): motor alternativo com modelos próprios (Qwen3.8-Flash-Next, Qwen3.6-35B-A3B)
+async function loadStrata() { try { S.strata = await api("/api/strata"); } catch { S.strata = null; } if (S.status) renderEngine(); }
+function strataBoxHTML(running) {
+  const k = S.strata; if (!k) { if (!S.strataAsked) { S.strataAsked = true; loadStrata(); } return ""; }
+  const e = S.status.engine, on = e.backend === "strata" && (e.state === "ready" || e.state === "loading");
+  const sel = S.strataSel || (S.strataSel = { family: k.catalog[0].family, model: k.catalog[0].models[0], context: "" });
+  const fam = k.catalog.find(c => c.family === sel.family) || k.catalog[0];
+  const famOpts = k.catalog.map(c => `<option value="${esc(c.family)}" ${c.family === fam.family ? "selected" : ""}>${esc(c.title)}</option>`).join("");
+  const modOpts = fam.models.map(m => `<option value="${esc(m)}" ${m === sel.model ? "selected" : ""}>${esc(m.toUpperCase())}</option>`).join("");
+  const ctxOpts = [`<option value="">${t("Contexto: automático")}</option>`].concat(k.contexts.map(c => `<option value="${esc(c)}" ${c === sel.context ? "selected" : ""}>${esc(c)}</option>`)).join("");
+  return `<div class="rea-box strata-box"><div class="rea-head"><b>🧱 Strata</b>${k.installed ? `<span class="tag fit">✅ ${esc(k.version || t("instalado"))}</span>` : ""}${on ? `<span class="tag on">${e.state === "ready" ? t("rodando") : t("iniciando...")}</span>` : ""}</div>
+    <small class="muted">${t("Motor alternativo ao llama.cpp, com modelos próprios (Qwen3.8-Flash-Next e Qwen3.6-35B-A3B) que usam GPU, RAM e SSD juntos. Na primeira vez que você inicia um modelo, o Strata baixa o motor da sua placa e o modelo (dezenas de GB).")}</small>
+    ${k.installed ? `<div class="row wrap"><select class="input" data-strata-sel="family">${famOpts}</select><select class="input" data-strata-sel="model">${modOpts}</select><select class="input" data-strata-sel="context">${ctxOpts}</select></div>
+    <div class="row wrap">${on ? `<button class="btn small danger" data-strata="stop">${t("Parar o Strata")}</button>` : `<button class="btn small primary" data-strata="launch" ${running ? "disabled" : ""}>${t("Iniciar com o Strata")}</button>`}
+      <button class="btn small" data-strata="install" ${running ? "disabled" : ""}>${t("Atualizar")}</button></div>`
+    : `<div class="row wrap"><button class="btn small primary" data-strata="install" ${running ? "disabled" : ""}>${t("Instalar o Strata")}</button></div>`}</div>`;
+}
+document.addEventListener("change", e => {
+  const k = e.target.closest("[data-strata-sel]")?.dataset.strataSel; if (!k || !S.strataSel) return;
+  S.strataSel[k] = e.target.value;
+  if (k === "family") S.strataSel.model = (S.strata.catalog.find(c => c.family === e.target.value) || { models: [""] }).models[0];
+  renderEngine();
+});
+document.addEventListener("click", async e => {
+  const a = e.target.closest("[data-strata]")?.dataset.strata; if (!a) return;
+  try {
+    if (a === "install") { await post("/api/strata/install"); toast(t("Instalando o Strata... acompanhe o progresso no topo da janela.")); }
+    if (a === "launch") { await post("/api/strata/launch", S.strataSel); toast(t("Iniciando o Strata... o progresso aparece no log do runtime."), 5000); }
+    if (a === "stop") { await post("/api/unload", {}); toast(t("Strata parado")); }
+  } catch (err) { toast(err.message, 6000); }
+  refreshStatus();
+});
 // REA (engenharia reversa) como componente do motor: instala uma vez e funciona sem internet
 function reaBoxHTML(running) {
   const r = S.media?.rea; if (!r) return "";

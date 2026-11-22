@@ -14,6 +14,8 @@ import urllib.request
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from html.parser import HTMLParser
 
+import nettls
+
 BROWSER_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
               "(KHTML, like Gecko) Chrome/141.0 Safari/537.36")
 
@@ -21,7 +23,7 @@ BROWSER_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
 def _get(url, data=None, timeout=10, accept="text/html,application/xhtml+xml,*/*;q=0.8"):
     req = urllib.request.Request(url, data=data, headers={
         "User-Agent": BROWSER_UA, "Accept": accept, "Accept-Language": "pt-BR,pt;q=0.9,en;q=0.8"})
-    with urllib.request.urlopen(req, timeout=timeout) as r:
+    with nettls.urlopen(req, timeout=timeout) as r:
         ctype = r.headers.get("Content-Type", "")
         raw = r.read(3_000_000)
         charset = r.headers.get_content_charset() or "utf-8"
