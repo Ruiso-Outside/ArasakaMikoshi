@@ -55,10 +55,10 @@ function agentsHint() {
 // ------------------------------------------------------------------ janela de edição
 function renderAgentsModal() {
   const ed = AG.edit;
-  $("#agentList").innerHTML = AG.doc.agents.map(a => `<div class="item clickable ${ed?.type === "agent" && ed.id === a.id ? "sel" : ""}" data-edit="agent:${a.id}">
+  $("#agentList").innerHTML = AG.doc.agents.map(a => `<div class="item clickable ${ed?.type === "agent" && ed.id === a.id ? "sel" : ""}" data-edit="agent:${esc(a.id)}">
       <span class="ag-dot" style="--c:${esc(a.color)}">${esc(a.icon)}</span><div class="name-col"><span class="name">${esc(a.name)}</span><small class="muted ag-model">${esc(agentModelName(a))}</small></div>${a.web ? '<span title="Pode pesquisar na web">🌐</span>' : ""}${a.mcp?.length ? `<span title="${esc(a.mcp.map(mcpName).join(", "))}">🔌</span>` : ""}</div>`).join("")
     || '<p class="muted small-note">Nenhum agente ainda.</p>';
-  $("#groupList").innerHTML = AG.doc.groups.map(g => `<div class="item clickable ${ed?.type === "group" && ed.id === g.id ? "sel" : ""}" data-edit="group:${g.id}">
+  $("#groupList").innerHTML = AG.doc.groups.map(g => `<div class="item clickable ${ed?.type === "group" && ed.id === g.id ? "sel" : ""}" data-edit="group:${esc(g.id)}">
       <span class="ag-dot" style="--c:#4a4d60">${esc(g.icon)}</span><span class="name">${esc(g.name)}</span><span class="meta">${g.steps.length}</span></div>`).join("")
     || '<p class="muted small-note">Nenhum grupo ainda.</p>';
   renderAgentEditor();

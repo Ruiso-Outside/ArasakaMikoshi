@@ -208,11 +208,18 @@ def tool_read_file(ws, path, start_line=None, end_line=None):
     return "\n".join(out) if out else "(arquivo vazio)"
 
 
+def _write_exact(p, text):
+    """Grava sem converter as quebras de linha. Path.write_text(newline=...) so existe no Python 3.10+;
+    o app aceita o 3.9, e nele o Codex nao conseguia criar nem editar arquivos."""
+    with open(p, "w", encoding="utf-8", newline="") as f:
+        f.write(text)
+
+
 def tool_write_file(ws, path, content):
     p = ws.path(path)
     existed = p.exists()
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(content, "utf-8", newline="")
+    _write_exact(p, content)
     n = content.count("\n") + (1 if content and not content.endswith("\n") else 0)
     return f"{'Atualizado' if existed else 'Criado'}: {ws.rel(p)} ({n} linhas)"
 
@@ -232,7 +239,7 @@ def tool_edit_file(ws, path, old_text, new_text, replace_all=False):
     if n > 1 and not replace_all:
         raise ToolError(f"old_text aparece {n} vezes. Inclua mais contexto ou use replace_all.")
     text = text.replace(old_text, new_text) if replace_all else text.replace(old_text, new_text, 1)
-    p.write_text(text.replace("\n", "\r\n") if crlf else text, "utf-8", newline="")
+    _write_exact(p, text.replace("\n", "\r\n") if crlf else text)
     return f"Editado: {ws.rel(p)} ({n if replace_all else 1} substituicao)"
 
 

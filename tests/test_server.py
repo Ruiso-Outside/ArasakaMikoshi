@@ -144,6 +144,30 @@ class ServerTest(unittest.TestCase):
             with urllib.request.urlopen(req, timeout=10) as r:
                 self.assertEqual(r.status, 200)
 
+    def test_02c_engine_requires_key(self):
+        # sites abertos no navegador nao podem usar o motor direto (o llama-server libera CORS para todos)
+        port = int(self.base.rsplit(":", 1)[1]) + 1
+        req = urllib.request.Request(f"http://127.0.0.1:{port}/v1/chat/completions", data=b'{"messages": []}',
+                                     headers={"Content-Type": "application/json", "Origin": "https://site-malicioso.com"})
+        with self.assertRaises(urllib.error.HTTPError) as cm:
+            urllib.request.urlopen(req, timeout=10)
+        self.assertEqual(cm.exception.code, 401)
+        log = "\n".join(self.call("/api/log")["log"])
+        self.assertIn("--api-key ***", log)  # a chave nao aparece no log do runtime
+
+    def test_02d_body_too_large(self):
+        # o servidor recusa antes de ler (nao guarda 1 GB na memoria)
+        port = int(self.base.rsplit(":", 1)[1])
+        with socket.create_connection(("127.0.0.1", port), timeout=10) as c:
+            c.sendall(f"POST /api/chat HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nContent-Type: application/json\r\n"
+                      f"Content-Length: {1 << 30}\r\n\r\n".encode())
+            raw = b""
+            while chunk := c.recv(4096):  # o servidor fecha a conexao depois da resposta
+                raw += chunk
+            head = raw.decode("utf-8", "replace")
+        self.assertIn(" 400 ", head.splitlines()[0])
+        self.assertIn("grande demais", head)
+
     def test_03_chat_stream(self):
         ev = self.sse("/api/chat", {"messages": [{"role": "user", "content": "oi"}], "temperature": 0.5})
         text = self.text_of(ev)

@@ -16,6 +16,13 @@ jobs:
       fail-fast: false
       matrix:
         os: [windows-latest, ubuntu-latest]
+        python: ["3.14"]
+        include:
+          # o app aceita o Python 3.9 ou mais novo (desktop/main.js e module/backend.js); confere que ainda roda nele
+          # (o ubuntu-latest e o 26.04, que nao tem builds do 3.9 no setup-python)
+          - os: ubuntu-24.04
+            python: "3.9"
+    name: tests (${{ matrix.os }}, Python ${{ matrix.python }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 15
     steps:
@@ -23,7 +30,7 @@ jobs:
 
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.14"
+          python-version: ${{ matrix.python }}
 
       - uses: actions/setup-node@v4
         with:
@@ -32,7 +39,7 @@ jobs:
       - name: Sintaxe do JavaScript
         shell: bash
         run: |
-          for f in app/web/*.js desktop/*.js desktop/scripts/*.js; do node --check "$f"; done
+          for f in app/web/*.js desktop/*.js desktop/scripts/*.js desktop/test/*.js; do node --check "$f"; done
           # scripts embutidos no HTML
           python - <<'EOF'
           import re, subprocess, pathlib, tempfile
@@ -51,3 +58,7 @@ jobs:
         env:
           PYTHONIOENCODING: utf-8
         run: python -m unittest discover -s tests -v
+
+      - name: Testes do atualizador (Node)
+        shell: bash
+        run: node --test desktop/test/*.test.js

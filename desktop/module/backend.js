@@ -1,4 +1,4 @@
-// Piphin LLM como módulo do Piphin Hub: faz o papel do desktop/main.js do app separado.
+// Arasaka Mikoshi como módulo da Arasaka Central: faz o papel do desktop/main.js do app separado.
 // Inicia o servidor Python (o mesmo app/ do app separado), cuida da pergunta rápida (janela extra
 // do Hub), dos atalhos globais, do print da tela e da área de transferência.
 // A configuração e a pasta de dados são as mesmas do app separado (%APPDATA%\LLM Local\config.json).

@@ -193,7 +193,7 @@ def make_handler(S):
 
         def upstream(self, port, path, payload, timeout=3600):
             req = urllib.request.Request(f"http://127.0.0.1:{port}{path}", data=json.dumps(payload).encode("utf-8"),
-                                         headers={"Content-Type": "application/json"})
+                                         headers=S.ENGINE_HEADERS)
             try:
                 return urllib.request.urlopen(req, timeout=timeout)
             except urllib.error.HTTPError as e:

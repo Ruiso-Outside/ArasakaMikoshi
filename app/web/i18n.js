@@ -1,10 +1,10 @@
 "use strict";
-// Tradução da interface do Piphin LLM: Português (original) e mais 11 idiomas.
+// Tradução da interface do Arasaka Mikoshi: Português (original) e mais 11 idiomas.
 // - Textos fixos são traduzidos automaticamente (inclusive os que aparecem depois, via MutationObserver).
 // - Textos com valores usam t("Texto {nome}", { nome }).
 // - O conteúdo das conversas, código e o que o usuário digita nunca são traduzidos.
 // - English e Español ficam no DICT abaixo; os outros vêm de i18n/<idioma>.js (gerados por i18n/gen.js).
-// - Dentro do Piphin Hub o idioma é o do Hub (piphin.info.lang) e o seletor do app some.
+// - Dentro da Arasaka Central o idioma é o do Hub (piphin.info.lang) e o seletor do app some.
 
 const LANGS = { "pt-BR": "Português (Brasil)", en: "English", es: "Español", th: "ไทย", zh: "简体中文", ja: "日本語", ko: "한국어",
   id: "Bahasa Indonesia", vi: "Tiếng Việt", fr: "Français", de: "Deutsch", ru: "Русский" };

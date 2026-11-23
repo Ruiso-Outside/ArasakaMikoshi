@@ -34,6 +34,38 @@ const manifest = { version, electron, file, size: data.length,
 fs.writeFileSync(path.join(dist, "patch.json"), JSON.stringify(manifest, null, 2));
 console.log(`✓ ${file} (${(data.length / 1e6).toFixed(1)} MB) e patch.json gerados`);
 
+// Envia um arquivo ao Release. O fetch do Node as vezes cai no meio do envio ("terminated"; aconteceu na 1.31.1
+// com o Node 26), e o Release ficava sem o modulo: o Arasaka Central dizia que a versao "nao tem o arquivo esperado".
+// Tenta 3 vezes com o fetch e depois com o curl (vem com o Windows 10+ e o Git).
+async function sendAsset(h, rel, name) {
+  const url = `https://uploads.github.com/repos/${owner}/${repo}/releases/${rel.id}/assets?name=${encodeURIComponent(name)}`;
+  const type = name.endsWith(".json") ? "application/json" : "application/zip";
+  const file = path.join(dist, name);
+  const clearOld = async () => { // um envio que caiu pode deixar um asset "starter" com o mesmo nome
+    const assets = await (await fetch(`https://api.github.com/repos/${owner}/${repo}/releases/${rel.id}/assets?per_page=100`, { headers: h })).json();
+    for (const a of assets.filter(a => a.name === name))
+      await fetch(`https://api.github.com/repos/${owner}/${repo}/releases/assets/${a.id}`, { method: "DELETE", headers: h });
+  };
+  let last = "";
+  for (let i = 1; i <= 3; i++) {
+    try {
+      await clearOld();
+      const r = await fetch(url, { method: "POST", headers: { ...h, "Content-Type": type }, body: fs.readFileSync(file) });
+      if (r.ok) return;
+      last = `HTTP ${r.status}: ${await r.text()}`;
+      if (r.status < 500) break; // erro de permissao ou de nome: tentar de novo nao adianta
+    } catch (e) {
+      last = e.message;
+    }
+    console.log(`  … ${name}: ${last}; tentando de novo (${i}/3)`);
+    await new Promise(r => setTimeout(r, 3000 * i));
+  }
+  await clearOld();
+  const c = spawnSync("curl", ["-sS", "--fail-with-body", "--retry", "3", "-X", "POST", "-H", `Authorization: Bearer ${h.Authorization.slice(7)}`,
+    "-H", `Content-Type: ${type}`, "--data-binary", `@${file}`, url], { encoding: "utf8" });
+  if (c.status !== 0) fail(`falha ao enviar ${name} (${last}; curl: ${(c.stderr || c.stdout || c.error?.message || "").trim()})`);
+}
+
 async function upload() {
   const token = process.env.GH_TOKEN;
   if (!token) fail("defina GH_TOKEN para enviar ao GitHub.");
@@ -43,12 +75,7 @@ async function upload() {
   if (!rel) fail(`Release v${version} não encontrado.`);
   const moduleZip = `piphin-module-llm-${version}.zip`;
   for (const name of [file, "patch.json", ...(fs.existsSync(path.join(dist, moduleZip)) ? [moduleZip] : [])]) {
-    const old = rel.assets.find(a => a.name === name);
-    if (old) await fetch(`https://api.github.com/repos/${owner}/${repo}/releases/assets/${old.id}`, { method: "DELETE", headers: h });
-    const body = fs.readFileSync(path.join(dist, name));
-    const r = await fetch(`https://uploads.github.com/repos/${owner}/${repo}/releases/${rel.id}/assets?name=${encodeURIComponent(name)}`,
-      { method: "POST", headers: { ...h, "Content-Type": name.endsWith(".json") ? "application/json" : "application/zip" }, body });
-    if (!r.ok) fail(`falha ao enviar ${name} (HTTP ${r.status}): ${await r.text()}`);
+    await sendAsset(h, rel, name);
     console.log(`✓ enviado ${name}`);
   }
 }

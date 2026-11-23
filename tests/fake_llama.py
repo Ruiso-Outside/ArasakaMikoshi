@@ -12,7 +12,8 @@ args = sys.argv[1:]
 port = int(args[args.index("--port") + 1])
 model = Path(args[args.index("-m") + 1]).stem
 CTX = int(args[args.index("-c") + 1]) if "-c" in args else 4096
-READY_AT = time.time() + 0.5
+READY_AT = time.time() + 0.15  # o servidor confere a cada 0,1 s no comeco
+API_KEY = args[args.index("--api-key") + 1] if "--api-key" in args else ""  # como o llama-server: /health e livre
 # placa de video falsa: com FAKE_VRAM_CTX, um contexto maior que isso nao cabe (as mesmas mensagens do llama.cpp)
 _vram = int(__import__("os").environ.get("FAKE_VRAM_CTX") or 0)
 if _vram and CTX > _vram and "--device" not in args:
@@ -63,7 +64,15 @@ class H(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(d)
 
+    def authorized(self):
+        if API_KEY and self.headers.get("Authorization") != f"Bearer {API_KEY}":
+            self.send({"error": {"code": 401, "message": "Invalid API Key", "type": "authentication_error"}}, 401)
+            return False
+        return True
+
     def do_GET(self):
+        if self.path != "/health" and not self.authorized():
+            return
         if self.path == "/health":
             ok = time.time() >= READY_AT
             return self.send({"status": "ok" if ok else "loading"}, 200 if ok else 503)
@@ -74,6 +83,8 @@ class H(BaseHTTPRequestHandler):
         self.wfile.flush()
 
     def do_POST(self):
+        if not self.authorized():
+            return
         req = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
         if self.path.endswith("/embeddings"):
             inputs = req["input"] if isinstance(req["input"], list) else [req["input"]]

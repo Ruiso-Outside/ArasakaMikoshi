@@ -11,6 +11,7 @@ import json
 import os
 import random
 import re
+import secrets
 import socket
 import shlex
 import shutil
@@ -60,6 +61,10 @@ CPU_COUNT = os.cpu_count() or 4
 HOST = "127.0.0.1"
 PORT = int(os.environ.get("LLM_PORT", "8765"))
 ENGINE_PORT = PORT + 1
+# Chave do motor (llama-server): nova a cada execucao. Sem ela, qualquer site aberto no navegador podia usar
+# o modelo pela porta do motor (o llama-server libera CORS para todos). Outros programas usam a API local (gateway).
+ENGINE_KEY = secrets.token_urlsafe(24)
+ENGINE_HEADERS = {"Content-Type": "application/json", "Authorization": f"Bearer {ENGINE_KEY}"}
 UA = "LLM-Local/1.0"
 BACKENDS = ("cuda", "vulkan", "cpu")
 
@@ -780,7 +785,7 @@ class EngineProcess:
         if device == "gpu" and self is not ENGINE_PROC and int(s["gpu_layers"]) >= 999:
             ngl = "auto"  # extra na GPU: tudo que couber na VRAM livre de verdade (o resto fica na RAM)
         cmd = [backs[backend]["exe"], "-m", str(model_path), "--host", "127.0.0.1", "--port", str(self.port),
-               "-c", str(int(s["ctx_size"])), "-ngl", ngl, "--jinja"]
+               "-c", str(int(s["ctx_size"])), "-ngl", ngl, "--jinja", "--api-key", ENGINE_KEY]
         if on_cpu:
             cmd += ["--device", "none"]  # CPU e RAM apenas, sem tocar na GPU
         if embed:
@@ -801,7 +806,7 @@ class EngineProcess:
         if s.get("extra_args", "").strip():
             cmd += [a.strip('"') for a in shlex.split(s["extra_args"], posix=False)]
         self.log.clear()
-        self.log.append("> " + " ".join(f'"{c}"' if " " in c else c for c in cmd))
+        self.log.append("> " + " ".join("***" if c == ENGINE_KEY else f'"{c}"' if " " in c else c for c in cmd))
         env = None
         if os.name != "nt":  # as bibliotecas .so do llama.cpp ficam ao lado do programa
             env = {**os.environ, "LD_LIBRARY_PATH": os.pathsep.join(filter(None, [str(Path(cmd[0]).parent), os.environ.get("LD_LIBRARY_PATH", "")]))}
@@ -864,16 +869,18 @@ class EngineProcess:
             self.log.append(raw.decode("utf-8", "replace").rstrip())
 
     def _wait_ready(self, proc):
+        started = time.monotonic()
         while proc is self.proc and proc.poll() is None:
             try:
-                with urllib.request.urlopen(f"http://127.0.0.1:{self.port}/health", timeout=2) as r:
+                with urllib.request.urlopen(urllib.request.Request(f"http://127.0.0.1:{self.port}/health", headers=ENGINE_HEADERS), timeout=2) as r:
                     if r.status == 200:
                         self.n_ctx, self.modalities = self._read_props()
                         self.state = "ready"
                         return
             except (urllib.error.URLError, OSError):
                 pass
-            time.sleep(0.5)
+            # modelo pequeno ou ja no cache do disco fica pronto em instantes: confere mais vezes no comeco
+            time.sleep(0.1 if time.monotonic() - started < 3 else 0.5)
         model_rel, s, device, embed, no_mtp = self._args
         used = getattr(self, "ctx_used", 0)
         if proc is self.proc and used > MIN_FIT_CTX and any(KV_OOM_RE.search(l) for l in list(self.log)[-40:]):
@@ -907,7 +914,7 @@ class EngineProcess:
 
     def _read_props(self):
         try:
-            with urllib.request.urlopen(f"http://127.0.0.1:{self.port}/props", timeout=3) as r:
+            with urllib.request.urlopen(urllib.request.Request(f"http://127.0.0.1:{self.port}/props", headers=ENGINE_HEADERS), timeout=3) as r:
                 p = json.loads(r.read().decode("utf-8"))
             n_ctx = int((p.get("default_generation_settings") or {}).get("n_ctx") or p.get("n_ctx") or 0)
             return n_ctx, {k: bool(v) for k, v in (p.get("modalities") or {}).items()}
@@ -1227,7 +1234,7 @@ def embed_texts(texts, on_wait=None):
     with POOL.use(rel, load_settings(), on_wait, "auto", embed=True) as eng:
         req = urllib.request.Request(f"http://127.0.0.1:{eng.port}/v1/embeddings",
                                      data=json.dumps({"input": texts, "model": "embed"}).encode("utf-8"),
-                                     headers={"Content-Type": "application/json"})
+                                     headers=ENGINE_HEADERS)
         try:
             with urllib.request.urlopen(req, timeout=600) as r:
                 data = json.loads(r.read().decode("utf-8"))
@@ -1727,10 +1734,18 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
+    MAX_JSON = 256 << 20  # 256 MB: cabe uma conversa longa com imagens; arquivos grandes vao por /api/upload (em partes)
+
     def body(self):
-        n = int(self.headers.get("Content-Length") or 0)
+        try:
+            n = int(self.headers.get("Content-Length") or 0)
+        except ValueError:
+            raise ValueError("Content-Length inválido") from None
         if not n:
             return {}
+        if n < 0 or n > self.MAX_JSON:
+            self.close_connection = True  # o corpo nao e lido; a conexao nao pode ser reaproveitada
+            raise ValueError(f"pedido grande demais ({n // (1 << 20)} MB; o limite é {self.MAX_JSON >> 20} MB)")
         return json.loads(self.rfile.read(n).decode("utf-8"))
 
     def check_origin(self):
@@ -2150,7 +2165,10 @@ class Handler(BaseHTTPRequestHandler):
         if not self.check_origin():
             return self.send_json({"error": "origem bloqueada"}, 403)
         p = urllib.parse.urlparse(self.path).path
-        b = self.body()
+        try:
+            b = self.body()
+        except ValueError as e:
+            return self.send_json({"error": str(e)}, 400)
         if p == "/api/agents":
             return self.send_json(agents.save(b))
         if p == "/api/mcp":
@@ -2224,8 +2242,7 @@ class Handler(BaseHTTPRequestHandler):
     def engine_call(self, payload, stream):
         port = getattr(self, "engine_port", ENGINE_PORT)
         req = urllib.request.Request(f"http://127.0.0.1:{port}/v1/chat/completions",
-                                     data=json.dumps(payload).encode("utf-8"),
-                                     headers={"Content-Type": "application/json"})
+                                     data=json.dumps(payload).encode("utf-8"), headers=ENGINE_HEADERS)
         try:
             return urllib.request.urlopen(req, timeout=3600)
         except urllib.error.HTTPError as e:
@@ -2939,7 +2956,7 @@ class Handler(BaseHTTPRequestHandler):
 def train_chat(prompt):
     """Pergunta ao modelo carregado (usado para gerar exemplos de treino)."""
     with POOL.use("", load_settings()) as eng:
-        req = urllib.request.Request(f"http://127.0.0.1:{eng.port}/v1/chat/completions", headers={"Content-Type": "application/json"},
+        req = urllib.request.Request(f"http://127.0.0.1:{eng.port}/v1/chat/completions", headers=ENGINE_HEADERS,
                                      data=json.dumps({"messages": [{"role": "user", "content": prompt}], "stream": False,
                                                       "temperature": 0.7, "max_tokens": 3000,
                                                       "chat_template_kwargs": {"enable_thinking": False}}).encode("utf-8"))
@@ -3085,7 +3102,7 @@ def main():
     configure_train()
     gateway.GATEWAY.configure(sys.modules[__name__])
     gateway.GATEWAY.apply()
-    print(f"Servidor em {url} | API OpenAI do motor: http://127.0.0.1:{ENGINE_PORT}/v1", flush=True)
+    print(f"Servidor em {url} | motor em http://127.0.0.1:{ENGINE_PORT} (com chave; outros programas usam a API local)", flush=True)
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:

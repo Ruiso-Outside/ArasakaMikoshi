@@ -10,13 +10,33 @@ from pathlib import Path
 TESTS = Path(__file__).resolve().parent
 HOME = Path(os.environ["LLM_HOME"])
 GB = 1024 ** 3
+
+
+def sparse(fh):
+    """No Windows, marca o arquivo como esparso: sem isso o NTFS grava os GB de zeros do truncate de verdade
+    (8,6 GB por classe de teste; levava de 20 s a 2 min, conforme o disco e o antivirus). No Linux ja e esparso."""
+    if os.name != "nt":
+        return
+    import ctypes
+    import msvcrt
+    from ctypes import wintypes
+    k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    k32.DeviceIoControl.argtypes = [wintypes.HANDLE, wintypes.DWORD, wintypes.LPVOID, wintypes.DWORD, wintypes.LPVOID,
+                                    wintypes.DWORD, ctypes.POINTER(wintypes.DWORD), wintypes.LPVOID]
+    FSCTL_SET_SPARSE = 0x000900C4
+    k32.DeviceIoControl(msvcrt.get_osfhandle(fh.fileno()), FSCTL_SET_SPARSE, None, 0, None, 0,
+                        ctypes.byref(wintypes.DWORD()), None)  # se falhar, so fica mais lento
+
+
 for name, size in [("models/Qwen3-8B-Q4_K_M.gguf", 5 * GB), ("models/gemma-3-4b-it-Q4_K_M.gguf", 3 * GB),
                    ("models/embed/Qwen3-Embedding-0.6B-Q8_0.gguf", 600 * 1024 ** 2)]:
     f = HOME / name
     f.parent.mkdir(parents=True, exist_ok=True)
     if not f.exists():
         with open(f, "wb") as fh:
-            fh.truncate(size)
+            sparse(fh)
+            fh.seek(size - 1)  # o truncate do Python no Windows (_chsize) grava zeros mesmo num arquivo esparso
+            fh.write(b"\0")
 
 sys.path.insert(0, str(TESTS.parent / "app"))
 import server  # noqa: E402

@@ -1,4 +1,4 @@
-// Espera o servidor Python do módulo subir e abre a interface do Piphin LLM (servida por ele).
+// Espera o servidor Python do módulo subir e abre a interface do Arasaka Mikoshi (servida por ele).
 const $ = (s) => document.querySelector(s);
 const MSG = {
   python: ["Python não encontrado", "O Arasaka Mikoshi precisa do Python 3.9 ou mais novo. Instale em python.org marcando \"Add python.exe to PATH\" e tente de novo."],

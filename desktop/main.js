@@ -1,4 +1,4 @@
-// Piphin LLM - app desktop.
+// Arasaka Mikoshi - app desktop.
 // Roda o servidor Python escondido, fica na bandeja do sistema e abre a
 // "pergunta rapida" por um atalho global.
 const { app, BrowserWindow, Tray, Menu, globalShortcut, ipcMain, nativeImage, screen, shell, dialog, Notification, session, desktopCapturer, clipboard } = require("electron");
@@ -26,13 +26,13 @@ const MAIN_I18N = {
   "O servidor interno parou várias vezes.": ["The internal server stopped several times.", "El servidor interno se detuvo varias veces."],
   "O servidor interno parou (código {c}). Reiniciando...": ["The internal server stopped (code {c}). Restarting...", "El servidor interno se detuvo (código {c}). Reiniciando..."],
   "Não foi possível aplicar a atualização; o app continua na versão atual.": ["Could not apply the update; the app stays on the current version.", "No se pudo aplicar la actualización; la app sigue en la versión actual."],
-  "A janela do Piphin LLM parou de responder.": ["The Piphin LLM window stopped responding.", "La ventana de Piphin LLM dejó de responder."],
+  "A janela do Arasaka Mikoshi parou de responder.": ["The Arasaka Mikoshi window stopped responding.", "La ventana de Arasaka Mikoshi dejó de responder."],
   "Isso costuma acontecer quando a memória da placa de vídeo enche ou uma resposta muito longa está sendo desenhada. O ocorrido foi salvo no relatório de diagnóstico.": ["This usually happens when the graphics card memory is full or a very long answer is being drawn. It was saved in the diagnostic report.", "Esto suele pasar cuando la memoria de la tarjeta gráfica se llena o se está dibujando una respuesta muy larga. Se guardó en el informe de diagnóstico."],
   "Recarregar a janela": ["Reload the window", "Recargar la ventana"],
   "Esperar": ["Wait", "Esperar"],
-  "Fechar o Piphin LLM": ["Close Piphin LLM", "Cerrar Piphin LLM"],
+  "Fechar o Arasaka Mikoshi": ["Close Arasaka Mikoshi", "Cerrar Arasaka Mikoshi"],
   "Abrir relatório de diagnóstico": ["Open diagnostic report", "Abrir informe de diagnóstico"],
-  "Abrir Piphin LLM": ["Open Piphin LLM", "Abrir Piphin LLM"],
+  "Abrir Arasaka Mikoshi": ["Open Arasaka Mikoshi", "Abrir Arasaka Mikoshi"],
   "Pergunta rápida": ["Quick ask", "Pregunta rápida"],
   "Descarregar modelos (liberar GPU)": ["Unload models (free the GPU)", "Descargar modelos (liberar la GPU)"],
   "Carregar último modelo": ["Load last model", "Cargar último modelo"],
@@ -49,16 +49,16 @@ const MAIN_I18N = {
   "Nenhum modelo carregado": ["No model loaded", "Ningún modelo cargado"],
   "Erro no motor": ["Engine error", "Error del motor"],
   "Servidor offline": ["Server offline", "Servidor desconectado"],
-  "Piphin LLM continua rodando": ["Piphin LLM is still running", "Piphin LLM sigue en ejecución"],
+  "Arasaka Mikoshi continua rodando": ["Arasaka Mikoshi is still running", "Arasaka Mikoshi sigue en ejecución"],
   "Use {k} para uma pergunta rápida. Para sair, clique com o botão direito no ícone perto do relógio.": ["Use {k} for a quick question. To quit, right-click the icon next to the clock.", "Usa {k} para una pregunta rápida. Para salir, haz clic derecho en el ícono junto al reloj."],
-  "Atualização do Piphin LLM": ["Piphin LLM update", "Actualización de Piphin LLM"],
+  "Atualização do Arasaka Mikoshi": ["Arasaka Mikoshi update", "Actualización de Arasaka Mikoshi"],
   "A versão {v} precisa do pacote completo. Abra Configurações → App desktop.": ["Version {v} needs the full package. Open Settings → Desktop app.", "La versión {v} necesita el paquete completo. Abre Configuración → App de escritorio."],
   "Baixando a versão {v} em segundo plano...": ["Downloading version {v} in the background...", "Descargando la versión {v} en segundo plano..."],
-  "A versão {v} do Piphin LLM está pronta.": ["Piphin LLM version {v} is ready.", "La versión {v} de Piphin LLM está lista."],
+  "A versão {v} do Arasaka Mikoshi está pronta.": ["Arasaka Mikoshi version {v} is ready.", "La versión {v} de Arasaka Mikoshi está lista."],
   "Reinicie para atualizar agora. Se preferir, a atualização será aplicada quando você fechar o app.": ["Restart to update now. Or the update will be applied when you close the app.", "Reinicia para actualizar ahora. Si prefieres, la actualización se aplicará al cerrar la app."],
   "Reiniciar e atualizar": ["Restart and update", "Reiniciar y actualizar"],
   "Depois": ["Later", "Después"],
-  "Criar atalhos do Piphin LLM?": ["Create Piphin LLM shortcuts?", "¿Crear accesos directos de Piphin LLM?"],
+  "Criar atalhos do Arasaka Mikoshi?": ["Create Arasaka Mikoshi shortcuts?", "¿Crear accesos directos de Arasaka Mikoshi?"],
   "No Menu Iniciar e na Área de Trabalho, apontando para:\n{p}\n\nDeixe a pasta do app onde ela está (se mover, crie os atalhos de novo pelo menu do ícone perto do relógio).": ["In the Start Menu and on the Desktop, pointing to:\n{p}\n\nKeep the app folder where it is (if you move it, create the shortcuts again from the menu of the icon next to the clock).", "En el Menú Inicio y en el Escritorio, apuntando a:\n{p}\n\nDeja la carpeta de la app donde está (si la mueves, vuelve a crear los accesos desde el menú del ícono junto al reloj)."],
   "Criar atalhos": ["Create shortcuts", "Crear accesos directos"],
   "Agora não": ["Not now", "Ahora no"],
@@ -69,7 +69,7 @@ const MAIN_I18N = {
   "Os modelos costumam ter de 3 a 20 GB cada, então prefira um disco com bastante espaço.\n\nPasta padrão: {d}": ["Models are usually 3 to 20 GB each, so prefer a drive with plenty of space.\n\nDefault folder: {d}", "Los modelos suelen tener de 3 a 20 GB cada uno, así que prefiere un disco con bastante espacio.\n\nCarpeta predeterminada: {d}"],
   "Usar a pasta padrão": ["Use the default folder", "Usar la carpeta predeterminada"],
   "Escolher outra pasta...": ["Choose another folder...", "Elegir otra carpeta..."],
-  "Pasta de dados do Piphin LLM": ["Piphin LLM data folder", "Carpeta de datos de Piphin LLM"],
+  "Pasta de dados do Arasaka Mikoshi": ["Arasaka Mikoshi data folder", "Carpeta de datos de Arasaka Mikoshi"],
   "O atalho {k} já está em uso por outro programa.": ["The shortcut {k} is already used by another program.", "El atajo {k} ya lo usa otro programa."],
   "Escolha outro em Configurações → App desktop.": ["Choose another one in Settings → Desktop app.", "Elige otro en Configuración → App de escritorio."],
 };
@@ -107,14 +107,14 @@ async function askHomeDir(firstRun) {
   const def = path.join(app.getPath("home"), "LLM Local");
   if (firstRun) {
     const r = await dialog.showMessageBox({
-      type: "question", title: "Piphin LLM", icon: nativeImage.createFromPath(ICON),
+      type: "question", title: "Arasaka Mikoshi", icon: nativeImage.createFromPath(ICON),
       message: tm("Onde guardar os modelos, o motor e as conversas?"),
       detail: tm("Os modelos costumam ter de 3 a 20 GB cada, então prefira um disco com bastante espaço.\n\nPasta padrão: {d}", { d: def }),
       buttons: [tm("Usar a pasta padrão"), tm("Escolher outra pasta...")], defaultId: 0, cancelId: 0, noLink: true,
     });
     if (r.response === 0) return def;
   }
-  const r = await dialog.showOpenDialog({ title: tm("Pasta de dados do Piphin LLM"), properties: ["openDirectory", "createDirectory"],
+  const r = await dialog.showOpenDialog({ title: tm("Pasta de dados do Arasaka Mikoshi"), properties: ["openDirectory", "createDirectory"],
     defaultPath: config.homeDir || def });
   return r.canceled ? (firstRun ? def : null) : r.filePaths[0];
 }
@@ -152,9 +152,9 @@ async function startServer() {
   if (await ping()) return true; // ja tem um servidor rodando
   const py = await findPython();
   if (!py) {
-    const r = await dialog.showMessageBox({ type: "error", title: "Piphin LLM",
+    const r = await dialog.showMessageBox({ type: "error", title: "Arasaka Mikoshi",
       message: "Python não encontrado",
-      detail: "O Piphin LLM precisa do Python 3.9 ou mais novo.\nInstale em python.org marcando a opção \"Add python.exe to PATH\" e abra o app de novo.",
+      detail: "O Arasaka Mikoshi precisa do Python 3.9 ou mais novo.\nInstale em python.org marcando a opção \"Add python.exe to PATH\" e abra o app de novo.",
       buttons: ["Abrir python.org", "Fechar"] });
     if (r.response === 0) shell.openExternal("https://www.python.org/downloads/");
     return false;
@@ -178,7 +178,7 @@ async function startServer() {
     await new Promise(r => setTimeout(r, 300));
   }
   diag("servidor interno não respondeu ao iniciar");
-  dialog.showMessageBox({ type: "error", title: "Piphin LLM", message: tm("O servidor interno não respondeu."), detail: tm("Veja o log em:") + "\n" + LOG_FILE });
+  dialog.showMessageBox({ type: "error", title: "Arasaka Mikoshi", message: tm("O servidor interno não respondeu."), detail: tm("Veja o log em:") + "\n" + LOG_FILE });
   return false;
 }
 
@@ -188,11 +188,11 @@ async function restartServer(code) {
   restarts = restarts.filter(t => Date.now() - t < 5 * 60 * 1000);
   if (restarts.length >= 3) {
     diag("servidor caiu 3 vezes em 5 minutos: parei de reiniciar");
-    return dialog.showMessageBox({ type: "error", title: "Piphin LLM", message: tm("O servidor interno parou várias vezes."),
+    return dialog.showMessageBox({ type: "error", title: "Arasaka Mikoshi", message: tm("O servidor interno parou várias vezes."),
       detail: tm("Veja o log em:") + "\n" + LOG_FILE });
   }
   restarts.push(Date.now());
-  if (Notification.isSupported()) new Notification({ title: "Piphin LLM", icon: ICON, body: tm("O servidor interno parou (código {c}). Reiniciando...", { c: code }) }).show();
+  if (Notification.isSupported()) new Notification({ title: "Arasaka Mikoshi", icon: ICON, body: tm("O servidor interno parou (código {c}). Reiniciando...", { c: code }) }).show();
   await new Promise(r => setTimeout(r, 1500));
   if (quitting) return;
   if (await startServer()) { diag("servidor reiniciado"); for (const w of [mainWin, quickWin]) if (w && !w.isDestroyed()) w.webContents.reload(); }
@@ -247,10 +247,10 @@ function watchWindow(win, name) {
     timer = setTimeout(async () => {
       if (asked || win.isDestroyed()) return;
       asked = true;
-      const { response } = await dialog.showMessageBox({ type: "warning", title: "Piphin LLM", noLink: true, defaultId: 0, cancelId: 1,
-        message: tm("A janela do Piphin LLM parou de responder."),
+      const { response } = await dialog.showMessageBox({ type: "warning", title: "Arasaka Mikoshi", noLink: true, defaultId: 0, cancelId: 1,
+        message: tm("A janela do Arasaka Mikoshi parou de responder."),
         detail: tm("Isso costuma acontecer quando a memória da placa de vídeo enche ou uma resposta muito longa está sendo desenhada. O ocorrido foi salvo no relatório de diagnóstico."),
-        buttons: [tm("Recarregar a janela"), tm("Esperar"), tm("Fechar o Piphin LLM")] });
+        buttons: [tm("Recarregar a janela"), tm("Esperar"), tm("Fechar o Arasaka Mikoshi")] });
       asked = false;
       if (win.isDestroyed()) return;
       if (response === 0) { diag(`[${name}] recarregada pelo usuário`); win.webContents.forcefullyCrashRenderer(); win.webContents.reload(); }
@@ -280,7 +280,7 @@ setInterval(() => {
 ipcMain.handle("open-diag", () => { const f = DIAG_FILE(); if (!fs.existsSync(f)) fs.writeFileSync(f, ""); shell.showItemInFolder(f); });
 
 function createMain(show) {
-  mainWin = new BrowserWindow({ width: 1240, height: 820, minWidth: 720, minHeight: 500, show: false, title: "Piphin LLM",
+  mainWin = new BrowserWindow({ width: 1240, height: 820, minWidth: 720, minHeight: 500, show: false, title: "Arasaka Mikoshi",
     icon: ICON, backgroundColor: "#0f1014", autoHideMenuBar: true, webPreferences: prefs });
   mainWin.removeMenu();
   guardLinks(mainWin);
@@ -292,7 +292,7 @@ function createMain(show) {
     e.preventDefault(); mainWin.hide();
     if (!trayHintShown && Notification.isSupported()) {
       trayHintShown = true;
-      new Notification({ title: tm("Piphin LLM continua rodando"), icon: ICON,
+      new Notification({ title: tm("Arasaka Mikoshi continua rodando"), icon: ICON,
         body: tm("Use {k} para uma pergunta rápida. Para sair, clique com o botão direito no ícone perto do relógio.", { k: prettyKey(config.hotkey) }) }).show();
     }
   });
@@ -410,10 +410,10 @@ async function updateTray() {
   const sig = [label, config.autoStart, config.hotkey, updateState.status, updateState.percent, curLang()].join("|");
   if (sig === lastTrayState) return;
   lastTrayState = sig;
-  tray.setToolTip("Piphin LLM - " + label);
+  tray.setToolTip("Arasaka Mikoshi - " + label);
   const lastModel = st?.settings?.last_model;
   tray.setContextMenu(Menu.buildFromTemplate([
-    { label: tm("Abrir Piphin LLM"), click: () => showMain() },
+    { label: tm("Abrir Arasaka Mikoshi"), click: () => showMain() },
     { label: `${tm("Pergunta rápida")}\t${prettyKey(config.hotkey)}`, click: showQuick },
     { type: "separator" },
     { label, enabled: false },
@@ -423,7 +423,7 @@ async function updateTray() {
     { type: "separator" },
     { label: tm("Iniciar com o Windows"), type: "checkbox", checked: config.autoStart, click: i => setOption("autoStart", i.checked) },
     { label: tm("Abrir pasta de dados"), click: () => shell.openPath(config.homeDir) },
-    { label: tm("Criar atalhos (Menu Iniciar e Área de Trabalho)"), visible: app.isPackaged, click: () => { if (createShortcuts()) new Notification({ title: "Piphin LLM", body: tm("Atalhos criados."), icon: ICON }).show(); } },
+    { label: tm("Criar atalhos (Menu Iniciar e Área de Trabalho)"), visible: app.isPackaged, click: () => { if (createShortcuts()) new Notification({ title: "Arasaka Mikoshi", body: tm("Atalhos criados."), icon: ICON }).show(); } },
     updateState.status === "ready"
       ? { label: tm("Reiniciar e atualizar para {v}", { v: updateState.version }), click: installUpdate }
       : updateState.status === "manual"
@@ -507,6 +507,7 @@ ipcMain.on("resize-quick", (_e, h) => {
 // modificacoes) nunca muda, entao o Controle Inteligente de Aplicativos do Windows nao bloqueia.
 // Se a versao do Electron mudar, e preciso o instalador completo: o app avisa e abre a pagina.
 const crypto = require("crypto");
+const updater = require("./updater-core");
 const RELEASES = "https://github.com/Ruiso-Outside/ArasakaMikoshi/releases";
 const RES = process.resourcesPath;
 let updateState = { status: "idle", version: "", percent: 0, error: "" };
@@ -520,11 +521,6 @@ function sendUpdateState(patch) {
   lastTrayState = ""; updateTray();
 }
 
-const cmpVer = (a, b) => {
-  const pa = String(a).split(".").map(Number), pb = String(b).split(".").map(Number);
-  for (let i = 0; i < 3; i++) if ((pa[i] || 0) !== (pb[i] || 0)) return (pa[i] || 0) - (pb[i] || 0);
-  return 0;
-};
 const errText = err => String(err?.message || err).split("\n")[0];
 
 // LLM_UPDATE_URL: pasta local de testes com patch.json e o zip; sem ela, usa os Releases do GitHub
@@ -554,12 +550,13 @@ async function checkForUpdates() {
     if (r.status === 404) return sendUpdateState({ status: "latest" }); // Release sem patch (versao antiga)
     if (!r.ok) throw new Error(`GitHub respondeu HTTP ${r.status}`);
     const m = await r.json();
-    if (cmpVer(m.version, app.getVersion()) <= 0) return sendUpdateState({ status: "latest" });
-    if (m.electron !== process.versions.electron) {
+    const plan = updater.planUpdate(m, app.getVersion(), process.versions.electron);
+    if (plan === "latest") return sendUpdateState({ status: "latest" });
+    if (plan === "manual") {
       // a versao nova troca o Electron: precisa do instalador completo
       sendUpdateState({ status: "manual", version: m.version });
       if (Notification.isSupported())
-        new Notification({ title: tm("Atualização do Piphin LLM"), icon: ICON, body: tm("A versão {v} precisa do pacote completo. Abra Configurações → App desktop.", { v: m.version }) }).show();
+        new Notification({ title: tm("Atualização do Arasaka Mikoshi"), icon: ICON, body: tm("A versão {v} precisa do pacote completo. Abra Configurações → App desktop.", { v: m.version }) }).show();
       return;
     }
     await downloadPatch(m);
@@ -571,7 +568,7 @@ async function checkForUpdates() {
 async function downloadPatch(m) {
   sendUpdateState({ status: "downloading", version: m.version, percent: 0 });
   if (Notification.isSupported())
-    new Notification({ title: tm("Atualização do Piphin LLM"), icon: ICON, body: tm("Baixando a versão {v} em segundo plano...", { v: m.version }) }).show();
+    new Notification({ title: tm("Atualização do Arasaka Mikoshi"), icon: ICON, body: tm("Baixando a versão {v} em segundo plano...", { v: m.version }) }).show();
   const staging = path.join(RES, `_update_${m.version}`);
   fs.rmSync(staging, { recursive: true, force: true });
   fs.mkdirSync(staging, { recursive: true }); // falha aqui se a pasta do app nao permitir escrita
@@ -601,16 +598,14 @@ async function downloadPatch(m) {
   });
   if (x.status !== 0) throw new Error("falha ao extrair a atualização: " + (x.stderr || "").trim().split("\n")[0]);
   fs.rmSync(zip, { force: true });
-  const pkg = JSON.parse(fs.readFileSync(path.join(staging, "app", "package.json"), "utf8"));
-  if (pkg.version !== m.version || !fs.existsSync(path.join(staging, "app", "main.js")) || !fs.existsSync(path.join(staging, "server", "server.py")))
-    throw new Error("o pacote da atualização está incompleto.");
+  updater.checkStaged(staging, m.version);
   patchReady = { version: m.version, staging };
   sendUpdateState({ status: "ready", version: m.version, percent: 100 });
   if (updatePromptShown) return;
   updatePromptShown = true;
   const res = await dialog.showMessageBox({
-    type: "info", title: "Piphin LLM", icon: nativeImage.createFromPath(ICON),
-    message: tm("A versão {v} do Piphin LLM está pronta.", { v: m.version }),
+    type: "info", title: "Arasaka Mikoshi", icon: nativeImage.createFromPath(ICON),
+    message: tm("A versão {v} do Arasaka Mikoshi está pronta.", { v: m.version }),
     detail: tm("Reinicie para atualizar agora. Se preferir, a atualização será aplicada quando você fechar o app."),
     buttons: [tm("Reiniciar e atualizar"), tm("Depois")], defaultId: 0, cancelId: 1, noLink: true,
   });
@@ -622,37 +617,15 @@ async function applyPatch() {
   if (!patchReady || applyingPatch) return false;
   applyingPatch = true;
   stopServer();
-  const done = [];
   try {
-    for (const d of ["app", "server"]) {
-      const cur = path.join(RES, d), old = path.join(RES, `_old_${d}`), next = path.join(patchReady.staging, d);
-      fs.rmSync(old, { recursive: true, force: true });
-      await renameRetry(cur, old); done.push([d, "old"]);
-      await renameRetry(next, cur); done.push([d, "new"]);
-    }
+    await updater.swapFolders(RES, patchReady.staging);
     return true;
   } catch (err) {
-    for (const [d, step] of done.reverse()) {
-      try {
-        if (step === "new") fs.renameSync(path.join(RES, d), path.join(patchReady.staging, d));
-        else fs.renameSync(path.join(RES, `_old_${d}`), path.join(RES, d));
-      } catch {}
-    }
     diag("falha ao aplicar a atualização: " + errText(err));
-    dialog.showMessageBox({ type: "error", title: "Piphin LLM", message: tm("Não foi possível aplicar a atualização; o app continua na versão atual."), detail: errText(err) });
+    dialog.showMessageBox({ type: "error", title: "Arasaka Mikoshi", message: tm("Não foi possível aplicar a atualização; o app continua na versão atual."), detail: errText(err) });
     return false;
   } finally {
     patchReady = null;
-  }
-}
-
-async function renameRetry(from, to) {
-  // o Windows pode segurar a pasta por alguns instantes depois que o servidor fecha
-  for (let i = 0; ; i++) {
-    try { return fs.renameSync(from, to); } catch (err) {
-      if (i >= 20 || !["EPERM", "EBUSY", "EACCES"].includes(err.code)) throw err;
-      await new Promise(r => setTimeout(r, 1000));
-    }
   }
 }
 
@@ -672,13 +645,14 @@ ipcMain.handle("update-install", () => { if (["ready", "manual"].includes(update
 // ------------------------------------------------------------------ atalhos (versao portatil)
 // O app e distribuido como .zip (o instalador NSIS e bloqueado pelo Controle Inteligente de
 // Aplicativos). Na primeira execucao, oferece criar os atalhos que um instalador criaria.
-const START_MENU_LNK = () => path.join(app.getPath("appData"), "Microsoft", "Windows", "Start Menu", "Programs", "Piphin LLM.lnk");
-const DESKTOP_LNK = () => path.join(app.getPath("desktop"), "Piphin LLM.lnk");
-// atalhos da época em que o app se chamava "LLM Local"
-const OLD_LNKS = () => [path.join(path.dirname(START_MENU_LNK()), "LLM Local.lnk"), path.join(app.getPath("desktop"), "LLM Local.lnk")];
+const START_MENU_LNK = () => path.join(app.getPath("appData"), "Microsoft", "Windows", "Start Menu", "Programs", "Arasaka Mikoshi.lnk");
+const DESKTOP_LNK = () => path.join(app.getPath("desktop"), "Arasaka Mikoshi.lnk");
+// atalhos da época em que o app se chamava "LLM Local" e "Piphin LLM": [menu iniciar, área de trabalho]
+const OLD_LNK_NAMES = ["LLM Local.lnk", "Piphin LLM.lnk"];
+const OLD_LNKS = () => OLD_LNK_NAMES.flatMap(n => [path.join(path.dirname(START_MENU_LNK()), n), path.join(app.getPath("desktop"), n)]);
 
 function createShortcuts() {
-  const opts = { target: process.execPath, icon: path.join(__dirname, "icon.ico"), iconIndex: 0, description: "Piphin LLM", appUserModelId: "studio.piphin.llmlocal" };
+  const opts = { target: process.execPath, icon: path.join(__dirname, "icon.ico"), iconIndex: 0, description: "Arasaka Mikoshi", appUserModelId: "studio.piphin.llmlocal" };
   let ok = true;
   for (const lnk of [START_MENU_LNK(), DESKTOP_LNK()]) ok = shell.writeShortcutLink(lnk, fs.existsSync(lnk) ? "replace" : "create", opts) && ok;
   if (ok) for (const old of OLD_LNKS()) try { fs.rmSync(old, { force: true }); } catch {}
@@ -686,13 +660,12 @@ function createShortcuts() {
 }
 
 async function offerShortcuts() {
-  if (!app.isPackaged || config.shortcutsOffered) return;
-  config.shortcutsOffered = true; saveConfig();
-  // atalhos antigos ("LLM Local"): troca pelos novos, com o nome e o ícone da Piphin
+  if (!app.isPackaged) return;
+  // atalhos antigos ("LLM Local", "Piphin LLM"): troca pelos novos a cada abertura, mesmo se já ofereceu antes
   const old = OLD_LNKS().filter(f => fs.existsSync(f));
   if (old.length) {
-    const wasDesktop = fs.existsSync(OLD_LNKS()[1]);
-    const opts = { target: process.execPath, icon: path.join(__dirname, "icon.ico"), iconIndex: 0, description: "Piphin LLM", appUserModelId: "studio.piphin.llmlocal" };
+    const wasDesktop = old.some(f => path.dirname(f) === app.getPath("desktop"));
+    const opts = { target: process.execPath, icon: path.join(__dirname, "icon.ico"), iconIndex: 0, description: "Arasaka Mikoshi", appUserModelId: "studio.piphin.llmlocal" };
     try {
       shell.writeShortcutLink(START_MENU_LNK(), fs.existsSync(START_MENU_LNK()) ? "replace" : "create", opts);
       if (wasDesktop) shell.writeShortcutLink(DESKTOP_LNK(), fs.existsSync(DESKTOP_LNK()) ? "replace" : "create", opts);
@@ -700,14 +673,16 @@ async function offerShortcuts() {
     } catch {}
     return;
   }
+  if (config.shortcutsOffered) return;
+  config.shortcutsOffered = true; saveConfig();
   if (fs.existsSync(START_MENU_LNK()) || fs.existsSync(DESKTOP_LNK())) return; // ja tem atalhos (instalacao antiga)
   const r = await dialog.showMessageBox({
-    type: "question", title: "Piphin LLM", icon: nativeImage.createFromPath(ICON),
-    message: tm("Criar atalhos do Piphin LLM?"),
+    type: "question", title: "Arasaka Mikoshi", icon: nativeImage.createFromPath(ICON),
+    message: tm("Criar atalhos do Arasaka Mikoshi?"),
     detail: tm("No Menu Iniciar e na Área de Trabalho, apontando para:\n{p}\n\nDeixe a pasta do app onde ela está (se mover, crie os atalhos de novo pelo menu do ícone perto do relógio).", { p: process.execPath }),
     buttons: [tm("Criar atalhos"), tm("Agora não")], defaultId: 0, cancelId: 1, noLink: true,
   });
-  if (r.response === 0 && !createShortcuts()) dialog.showMessageBox({ type: "error", title: "Piphin LLM", message: tm("Não foi possível criar os atalhos.") });
+  if (r.response === 0 && !createShortcuts()) dialog.showMessageBox({ type: "error", title: "Arasaka Mikoshi", message: tm("Não foi possível criar os atalhos.") });
 }
 
 // ------------------------------------------------------------------ inicio
@@ -731,7 +706,7 @@ app.whenReady().then(async () => {
   updateTray(); setInterval(updateTray, 4000);
 
   if (!registerHotkey(config.hotkey)) {
-    dialog.showMessageBox({ type: "warning", title: "Piphin LLM", message: tm("O atalho {k} já está em uso por outro programa.", { k: prettyKey(config.hotkey) }),
+    dialog.showMessageBox({ type: "warning", title: "Arasaka Mikoshi", message: tm("O atalho {k} já está em uso por outro programa.", { k: prettyKey(config.hotkey) }),
       detail: tm("Escolha outro em Configurações → App desktop.") });
   }
   registerHotkey(config.voiceHotkey, voiceShortcut);

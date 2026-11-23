@@ -15,6 +15,8 @@ on:
 
 permissions:
   contents: write
+  id-token: write      # attestation: prova que o instalador saiu deste workflow (gh attestation verify)
+  attestations: write
 
 jobs:
   testes:
@@ -53,6 +55,13 @@ jobs:
         run: |
           npx electron-builder --win --config electron-builder-nsis.json --publish never
           ls -la dist-nsis
+
+      - name: Attestation do instalador
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: |
+            desktop/dist-nsis/*.exe
+            desktop/dist-nsis/latest.yml
 
       - name: Anexar ao Release
         working-directory: desktop

@@ -34,7 +34,7 @@ A atualização **não executa nenhum instalador**: ela troca só as pastas `res
 > **Assinatura digital:** para o Windows mostrar "Editor: Piphin Studio" e aceitar também o instalador, é preciso um certificado de assinatura de código (OV, a partir de ~US$ 216/ano; em nome da empresa exige CNPJ). O Azure Artifact Signing não está disponível para o Brasil.
 
 ### Publicar uma versão nova (para todos os PCs atualizarem)
-1. Aumente `"version"` em `desktop/package.json` (ex.: `1.2.0` → `1.3.0`).
+1. Aumente `"version"` em `desktop/package.json` (ex.: `1.2.0` → `1.3.0`) e atualize o `package-lock.json` com `npm install --package-lock-only` (o `release` confere).
 2. Faça commit e push, e crie a tag da versão: `git tag v1.3.0` e `git push origin v1.3.0`.
 3. Publique o Release (precisa de um token do GitHub com permissão de escrita no repositório, na variável `GH_TOKEN`):
 ```
@@ -42,7 +42,11 @@ cd desktop
 set GH_TOKEN=seu_token
 npm run release
 ```
-O comando confere a tag, cria **um único** Release, gera o `.zip` portátil e o pacote de atualização (`app-patch-X.zip` + `patch.json`), e espera o **GitHub Actions** (workflow *Instalador Windows*, disparado pela tag) anexar o instalador `LLM-Local-Setup-X.exe` + `latest.yml`, que as versões antigas (até a 1.3.0) usam para se atualizar. O instalador é gerado na nuvem porque o Controle Inteligente de Aplicativos bloqueia o build dele no PC. Ele gera o pacote (`app-patch-X.zip` + `patch.json`), envia tudo e no fim verifica se tudo baixa. Ele cria o Release `v1.3.0` com os arquivos que o app usa para se atualizar (`latest.yml`, instalador e `.blockmap`).
+O comando confere a tag, cria **um único** Release **como rascunho**, gera o `.zip` portátil e o pacote de atualização (`app-patch-X.zip` + `patch.json`), e espera o **GitHub Actions** (workflow *Instalador Windows*, disparado pela tag) anexar o instalador `LLM-Local-Setup-X.exe` + `latest.yml`, que as versões antigas (até a 1.3.0) usam para se atualizar. O instalador é gerado na nuvem porque o Controle Inteligente de Aplicativos bloqueia o build dele no PC. Ele gera o pacote (`app-patch-X.zip` + `patch.json`), envia tudo e no fim verifica se tudo baixa. Ele cria o Release `v1.3.0` com os arquivos que o app usa para se atualizar (`latest.yml`, instalador e `.blockmap`).
+
+O Release só é **publicado** no fim, quando todos os arquivos estão lá. Enquanto é rascunho, nem os apps nem a Arasaka Central o enxergam; antes da 1.32.0, um envio que falhava deixava a versão nova visível sem o módulo ("A versão não tem o arquivo esperado"). Os envios tentam de novo sozinhos e, se o `fetch` do Node cair, usam o `curl`. Se algo falhar, rode de novo `npm run release`: ele reaproveita o rascunho.
+
+O instalador gerado no GitHub Actions vem com **attestation** (prova de que saiu do workflow, sem modificações). Para conferir: `gh attestation verify LLM-Local-Setup-X.exe --repo Ruiso-Outside/ArasakaMikoshi`.
 
 ### Gerar a versão portátil de novo, sem publicar
 ```
@@ -297,7 +301,7 @@ Em **Configurações → Idioma** escolha a língua do app: **Português (Brasil
 - **Contexto**: quanto o modelo "lembra" da conversa. Mais contexto usa mais VRAM. Com 16 GB, 8k–32k vai bem para modelos de 7B–14B.
 - **Recusas**: o app não filtra nada. Se um modelo recusar pedidos, isso vem do treino do próprio modelo. Versões *abliterated* ou *uncensored* do Hugging Face são ajustadas para recusar menos.
 - **Modelos com raciocínio** (Qwen3, DeepSeek-R1...): o "pensamento" aparece em um bloco recolhível.
-- **API compatível com OpenAI**: com um modelo carregado, outros programas podem usar `http://127.0.0.1:8766/v1` (ex.: extensões de VS Code, scripts).
+- **API compatível com OpenAI**: outros programas (extensões de VS Code, scripts) usam a **API local** (Configurações → Integrações, `http://127.0.0.1:11434/v1`). A porta do motor (8766) só aceita a própria Mikoshi: desde a 1.32.0 ela exige uma chave nova a cada execução, porque o llama.cpp aceita pedidos de qualquer site aberto no navegador.
 
 ## Testes
 

@@ -3,6 +3,8 @@
 //   node scripts/release-check.js --verify   -> confere que existe UM Release com os arquivos baixáveis
 //   ... --verify --wait-installer            -> também espera (até 25 min) o GitHub Actions anexar o instalador
 //                                               NSIS + latest.yml, usados pelas versões antigas (até a 1.3.0)
+// O Release nasce como rascunho (draft) e só é publicado no --verify, quando todos os arquivos já estão lá: antes,
+// o Arasaka Central e o app viam a versão nova pela metade (sem o módulo) se um envio falhasse.
 // Motivo: quando o electron-builder cria o Release sozinho, às vezes cria dois com a mesma
 // tag (os envios rodam em paralelo) e os arquivos ficam divididos, quebrando o latest.yml.
 const { version } = require("../package.json");
@@ -23,14 +25,19 @@ async function releasesForTag() {
 
 async function prepare() {
   if (!token) fail("defina a variável GH_TOKEN com um token do GitHub (permissão de escrita no repositório).");
+  const lock = require("../package-lock.json").version;
+  if (lock !== version) fail(`package-lock.json está na versão ${lock}, não ${version}. Rode: npm install --package-lock-only`);
   const ref = await api(`/git/ref/tags/${tag}`);
   if (!ref.ok) fail(`a tag ${tag} não existe no GitHub. Rode: git tag ${tag} && git push origin ${tag}`);
   const existing = await releasesForTag();
   if (existing.length > 1) fail(`já existem ${existing.length} Releases com a tag ${tag}. Apague os duplicados no GitHub.`);
-  if (existing.length === 1) return console.log(`✓ Release ${tag} já existe; o electron-builder vai enviar os arquivos para ele.`);
-  const r = await api("/releases", { method: "POST", body: JSON.stringify({ tag_name: tag, name: version, draft: false, prerelease: false }) });
+  if (existing.length === 1) {
+    if (!existing[0].draft) fail(`o Release ${tag} já está publicado. Para refazer, apague-o no GitHub ou aumente a versão.`);
+    return console.log(`✓ rascunho do Release ${tag} já existe; o electron-builder vai enviar os arquivos para ele.`);
+  }
+  const r = await api("/releases", { method: "POST", body: JSON.stringify({ tag_name: tag, name: version, draft: true, prerelease: false }) });
   if (!r.ok) fail(`não foi possível criar o Release (HTTP ${r.status}): ${await r.text()}`);
-  console.log(`✓ Release ${tag} criado.`);
+  console.log(`✓ rascunho do Release ${tag} criado (só aparece para os PCs quando estiver completo).`);
 }
 
 const INSTALLER = ["latest.yml", `LLM-Local-Setup-${version}.exe`, `LLM-Local-Setup-${version}.exe.blockmap`];
@@ -54,6 +61,13 @@ async function verify() {
   const needed = ["patch.json", `app-patch-${version}.zip`, `LLM-Local-${version}-win-x64.zip`, `piphin-module-llm-${version}.zip`, ...INSTALLER];
   const missing = needed.filter(n => !names.includes(n));
   if (missing.length) fail(`faltam arquivos no Release: ${missing.join(", ")}`);
+  const broken = rels[0].assets.filter(a => needed.includes(a.name) && a.state !== "uploaded").map(a => a.name);
+  if (broken.length) fail(`envio incompleto no Release: ${broken.join(", ")}`);
+  if (rels[0].draft) {
+    const r = await api(`/releases/${rels[0].id}`, { method: "PATCH", body: JSON.stringify({ draft: false, make_latest: "true" }) });
+    if (!r.ok) fail(`não foi possível publicar o rascunho (HTTP ${r.status}): ${await r.text()}`);
+    console.log(`✓ Release ${tag} publicado (tinha todos os arquivos).`);
+  }
   for (const n of needed) {
     const r = await fetch(`https://github.com/${owner}/${repo}/releases/download/${tag}/${n}?v=${Date.now()}`, { method: "HEAD", redirect: "follow" });
     if (!r.ok) fail(`${n} não baixa (HTTP ${r.status}). O repositório está público?`);

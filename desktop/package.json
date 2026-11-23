@@ -1,7 +1,7 @@
 {
   "name": "llm-local",
   "productName": "LLM Local",
-  "version": "1.31.1",
+  "version": "1.32.0",
   "description": "Piphin LLM: IA local no seu PC, sem conta e sem restrições (Piphin Studio)",
   "main": "main.js",
   "author": "Piphin Studio",
@@ -21,6 +21,7 @@
     "copyright": "Piphin Studio",
     "files": [
       "main.js",
+      "updater-core.js",
       "preload.js",
       "icon.png",
       "icon-tray.png",
@@ -57,8 +58,8 @@
       {
         "provider": "github",
         "owner": "Ruiso-Outside",
-        "repo": "LLM",
-        "releaseType": "release"
+        "repo": "ArasakaMikoshi",
+        "releaseType": "draft"
       }
     ],
     "asar": false
