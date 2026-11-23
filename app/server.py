@@ -1738,8 +1738,19 @@ class Handler(BaseHTTPRequestHandler):
         origin = self.headers.get("Origin")
         return not origin or origin in (f"http://{HOST}:{PORT}", f"http://localhost:{PORT}")
 
+    def check_host(self):
+        """Protege contra DNS rebinding: um site que faz o proprio dominio apontar para 127.0.0.1 manda o Host
+        dele (e, num GET, nenhum Origin). So aceita os nomes locais."""
+        host = (self.headers.get("Host") or "").rsplit(":", 1)[0].lower()
+        if host in (HOST, "localhost"):
+            return True
+        self.send_json({"error": "host bloqueado"}, 403)
+        return False
+
     # rotas
     def do_GET(self):
+        if not self.check_host():
+            return
         url = urllib.parse.urlparse(self.path)
         p, q = url.path, urllib.parse.parse_qs(url.query)
         try:
@@ -1874,6 +1885,8 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(data)
 
     def do_POST(self):
+        if not self.check_host():
+            return
         if not self.check_origin():
             return self.send_json({"error": "origem bloqueada"}, 403)
         p = urllib.parse.urlparse(self.path).path
@@ -2132,6 +2145,8 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json({"error": str(e)}, 400)
 
     def do_PUT(self):
+        if not self.check_host():
+            return
         if not self.check_origin():
             return self.send_json({"error": "origem bloqueada"}, 403)
         p = urllib.parse.urlparse(self.path).path
@@ -2175,6 +2190,8 @@ class Handler(BaseHTTPRequestHandler):
         self.send_json({"error": "rota desconhecida"}, 404)
 
     def do_DELETE(self):
+        if not self.check_host():
+            return
         if not self.check_origin():
             return self.send_json({"error": "origem bloqueada"}, 403)
         p = urllib.parse.urlparse(self.path).path
@@ -2544,10 +2561,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def mikoshi_mcp(self):
         """Servidor MCP da Mikoshi (HTTP streamable, respostas em JSON): generate_sprite, pixelate_image, sprite_status."""
-        host = (self.headers.get("Host") or "").split(":")[0]
-        if host not in (HOST, "localhost"):  # protege contra DNS rebinding
-            return self.send_json({"error": "host bloqueado"}, 403)
-        try:
+        try:  # o Host ja foi conferido em do_POST (DNS rebinding)
             msg = self.body()
         except ValueError:
             return self.send_json({"jsonrpc": "2.0", "id": None, "error": {"code": -32700, "message": "JSON inválido"}}, 400)

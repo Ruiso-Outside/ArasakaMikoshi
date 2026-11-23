@@ -4,6 +4,8 @@
 
 App da **Piphin Studio** para rodar modelos de IA no seu PC. Sem conta, sem plano pago, sem telemetria e sem nada sendo enviado para a internet. (Os arquivos e a pasta do programa ainda se chamam `LLM Local`, para as instalações existentes continuarem se atualizando.)
 
+**Só o seu PC acessa a Mikoshi:** o servidor interno (`http://127.0.0.1:8765`) só aceita pedidos endereçados a `127.0.0.1` ou `localhost`. Assim, nenhum site aberto no navegador consegue ler suas conversas, configurações ou a chave da API local, nem com o truque de fazer o próprio domínio apontar para o seu PC (*DNS rebinding*). Até a 1.31.0, isso só era conferido no servidor MCP.
+
 ## Instalação
 
 1. Baixe **`LLM-Local-X.Y.Z-win-x64.zip`** na página de [Releases](https://github.com/Ruiso-Outside/ArasakaMikoshi/releases/latest).

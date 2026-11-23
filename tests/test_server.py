@@ -129,6 +129,21 @@ class ServerTest(unittest.TestCase):
             urllib.request.urlopen(req, timeout=10)
         self.assertEqual(cm.exception.code, 403)
 
+    def test_02b_dns_rebinding_blocked(self):
+        # site que aponta o proprio dominio para 127.0.0.1: GET sem Origin, mas com o Host dele
+        port = self.base.rsplit(":", 1)[1]
+        for method, path, data in (("GET", "/api/integration", None), ("GET", "/api/status", None),
+                                   ("GET", "/", None), ("PUT", "/api/settings", b"{}")):
+            req = urllib.request.Request(self.base + path, data=data, method=method,
+                                         headers={"Host": f"site-malicioso.com:{port}", "Content-Type": "application/json"})
+            with self.assertRaises(urllib.error.HTTPError, msg=f"{method} {path}") as cm:
+                urllib.request.urlopen(req, timeout=10)
+            self.assertEqual(cm.exception.code, 403)
+        for host in ("127.0.0.1", "localhost"):
+            req = urllib.request.Request(self.base + "/api/integration", headers={"Host": f"{host}:{port}"})
+            with urllib.request.urlopen(req, timeout=10) as r:
+                self.assertEqual(r.status, 200)
+
     def test_03_chat_stream(self):
         ev = self.sse("/api/chat", {"messages": [{"role": "user", "content": "oi"}], "temperature": 0.5})
         text = self.text_of(ev)
