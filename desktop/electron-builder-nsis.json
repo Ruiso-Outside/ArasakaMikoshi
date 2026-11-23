@@ -2,7 +2,7 @@
   "appId": "studio.piphin.llmlocal",
   "productName": "LLM Local",
   "copyright": "Piphin Studio",
-  "files": ["main.js", "preload.js", "icon.png", "icon-tray.png", "icon.ico"],
+  "files": ["main.js", "updater-core.js", "preload.js", "icon.png", "icon-tray.png", "icon.ico"],
   "extraResources": [
     { "from": "../app", "to": "server", "filter": ["**/*", "!__pycache__/**", "!**/*.pyc"] }
   ],
@@ -27,5 +27,5 @@
     "installerIcon": "icon.ico",
     "uninstallerIcon": "icon.ico"
   },
-  "publish": [{ "provider": "github", "owner": "Ruiso-Outside", "repo": "LLM", "releaseType": "release" }]
+  "publish": [{ "provider": "github", "owner": "Ruiso-Outside", "repo": "ArasakaMikoshi", "releaseType": "release" }]
 }

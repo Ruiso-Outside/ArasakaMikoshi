@@ -1,79 +1,61 @@
-// Prepara e confere o Release do GitHub usado pela atualização automática.
-//   node scripts/release-check.js            -> cria o Release da versão atual (antes do electron-builder)
-//   node scripts/release-check.js --verify   -> confere que existe UM Release com os arquivos baixáveis
-//   ... --verify --wait-installer            -> também espera (até 25 min) o GitHub Actions anexar o instalador
-//                                               NSIS + latest.yml, usados pelas versões antigas (até a 1.3.0)
-// O Release nasce como rascunho (draft) e só é publicado no --verify, quando todos os arquivos já estão lá: antes,
-// o Arasaka Central e o app viam a versão nova pela metade (sem o módulo) se um envio falhasse.
-// Motivo: quando o electron-builder cria o Release sozinho, às vezes cria dois com a mesma
-// tag (os envios rodam em paralelo) e os arquivos ficam divididos, quebrando o latest.yml.
-const { version } = require("../package.json");
-const { owner, repo } = require("../package.json").build.publish[0];
+// Publica uma versão pela tag. Quem monta e publica o Release é o GitHub Actions (.github/workflows/release.yml):
+// o .zip portátil, o pacote de atualização, o módulo da Central e o instalador, com attestation.
+// O mesmo que o "Publicar" da aba Desenvolvedor da Arasaka Central.
+//   node scripts/release-check.js            -> confere o repositório, cria a tag vX.Y.Z da versão atual, envia e
+//                                               espera o Release ser publicado
+//   node scripts/release-check.js --verify   -> só confere o Release publicado (todos os arquivos baixam)
+// Sem token: usa o login do GitHub salvo no git. GH_TOKEN (opcional) só evita o limite de consultas da API.
+const { execFileSync } = require("child_process");
+const path = require("path");
+const pkg = require("../package.json");
 
-const token = process.env.GH_TOKEN;
+const { version } = pkg;
+const repo = "Ruiso-Outside/ArasakaMikoshi";
 const tag = `v${version}`;
-const api = (path, opts = {}) => fetch(`https://api.github.com/repos/${owner}/${repo}${path}`, {
-  ...opts, headers: { Authorization: `Bearer ${token}`, "User-Agent": "llm-local-release", Accept: "application/vnd.github+json", ...opts.headers },
-});
+const root = path.join(__dirname, "..", "..");
 const fail = msg => { console.error("✗ " + msg); process.exit(1); };
+const git = (...args) => execFileSync("git", args, { cwd: root, encoding: "utf8" }).trim();
+const headers = { "User-Agent": "mikoshi-release", Accept: "application/vnd.github+json",
+  ...(process.env.GH_TOKEN ? { Authorization: `Bearer ${process.env.GH_TOKEN}` } : {}) };
 
-async function releasesForTag() {
-  const r = await api("/releases?per_page=100");
-  if (!r.ok) fail(`não foi possível listar os Releases (HTTP ${r.status}). GH_TOKEN está certo?`);
-  return (await r.json()).filter(x => x.tag_name === tag);
+const NEEDED = ["patch.json", `app-patch-${version}.zip`, `LLM-Local-${version}-win-x64.zip`, `piphin-module-llm-${version}.zip`,
+  "latest.yml", `LLM-Local-Setup-${version}.exe`, `LLM-Local-Setup-${version}.exe.blockmap`];
+
+function pushTag() {
+  if (git("status", "--porcelain")) fail("há arquivos alterados sem commit. Faça o commit antes de publicar.");
+  if (git("branch", "--show-current") !== "main") fail("publique a partir do main.");
+  git("fetch", "-q", "origin", "main", "--tags");
+  if (git("rev-parse", "HEAD") !== git("rev-parse", "origin/main")) fail("o main local e o do GitHub estão diferentes. Faça pull/push antes.");
+  if (git("tag", "--list", tag) === tag) fail(`a tag ${tag} já existe. Aumente "version" em desktop/package.json.`);
+  git("tag", "-a", tag, "-m", `Arasaka Mikoshi ${tag}`);
+  git("push", "-q", "origin", tag);
+  console.log(`✓ tag ${tag} enviada. O GitHub Actions monta e publica o Release: https://github.com/${repo}/actions`);
 }
 
-async function prepare() {
-  if (!token) fail("defina a variável GH_TOKEN com um token do GitHub (permissão de escrita no repositório).");
-  const lock = require("../package-lock.json").version;
-  if (lock !== version) fail(`package-lock.json está na versão ${lock}, não ${version}. Rode: npm install --package-lock-only`);
-  const ref = await api(`/git/ref/tags/${tag}`);
-  if (!ref.ok) fail(`a tag ${tag} não existe no GitHub. Rode: git tag ${tag} && git push origin ${tag}`);
-  const existing = await releasesForTag();
-  if (existing.length > 1) fail(`já existem ${existing.length} Releases com a tag ${tag}. Apague os duplicados no GitHub.`);
-  if (existing.length === 1) {
-    if (!existing[0].draft) fail(`o Release ${tag} já está publicado. Para refazer, apague-o no GitHub ou aumente a versão.`);
-    return console.log(`✓ rascunho do Release ${tag} já existe; o electron-builder vai enviar os arquivos para ele.`);
+async function waitPublished() {
+  console.log("… esperando o Release ser publicado (testes + build, uns 15 min)");
+  for (let i = 0; i < 180; i++) {
+    const r = await fetch(`https://api.github.com/repos/${repo}/releases/tags/${tag}`, { headers });
+    if (r.ok) return r.json(); // rascunhos não aparecem aqui: só o Release já completo
+    if (r.status !== 404) console.log(`  (GitHub respondeu HTTP ${r.status}; tentando de novo)`);
+    await new Promise(res => setTimeout(res, 10000));
   }
-  const r = await api("/releases", { method: "POST", body: JSON.stringify({ tag_name: tag, name: version, draft: true, prerelease: false }) });
-  if (!r.ok) fail(`não foi possível criar o Release (HTTP ${r.status}): ${await r.text()}`);
-  console.log(`✓ rascunho do Release ${tag} criado (só aparece para os PCs quando estiver completo).`);
-}
-
-const INSTALLER = ["latest.yml", `LLM-Local-Setup-${version}.exe`, `LLM-Local-Setup-${version}.exe.blockmap`];
-
-async function waitInstaller() {
-  console.log("… esperando o GitHub Actions gerar e anexar o instalador (workflow \"Instalador Windows\")");
-  for (let i = 0; i < 150; i++) {
-    const rels = await releasesForTag();
-    const names = (rels[0]?.assets || []).map(a => a.name);
-    if (INSTALLER.every(n => names.includes(n))) return console.log("✓ instalador anexado pelo GitHub Actions");
-    await new Promise(r => setTimeout(r, 10000));
-  }
-  fail("o instalador não apareceu em 25 min. Veja https://github.com/" + owner + "/" + repo + "/actions");
+  fail(`o Release não foi publicado em 30 min. Veja https://github.com/${repo}/actions`);
 }
 
 async function verify() {
-  if (process.argv.includes("--wait-installer")) await waitInstaller();
-  const rels = await releasesForTag();
-  if (rels.length !== 1) fail(`esperado 1 Release com a tag ${tag}, encontrados ${rels.length}.`);
-  const names = rels[0].assets.map(a => a.name);
-  const needed = ["patch.json", `app-patch-${version}.zip`, `LLM-Local-${version}-win-x64.zip`, `piphin-module-llm-${version}.zip`, ...INSTALLER];
-  const missing = needed.filter(n => !names.includes(n));
+  const rel = await waitPublished();
+  const names = rel.assets.map(a => a.name);
+  const missing = NEEDED.filter(n => !names.includes(n));
   if (missing.length) fail(`faltam arquivos no Release: ${missing.join(", ")}`);
-  const broken = rels[0].assets.filter(a => needed.includes(a.name) && a.state !== "uploaded").map(a => a.name);
-  if (broken.length) fail(`envio incompleto no Release: ${broken.join(", ")}`);
-  if (rels[0].draft) {
-    const r = await api(`/releases/${rels[0].id}`, { method: "PATCH", body: JSON.stringify({ draft: false, make_latest: "true" }) });
-    if (!r.ok) fail(`não foi possível publicar o rascunho (HTTP ${r.status}): ${await r.text()}`);
-    console.log(`✓ Release ${tag} publicado (tinha todos os arquivos).`);
+  for (const n of NEEDED) {
+    const r = await fetch(`https://github.com/${repo}/releases/download/${tag}/${n}?v=${Date.now()}`, { method: "HEAD", redirect: "follow" });
+    if (!r.ok) fail(`${n} não baixa (HTTP ${r.status}).`);
   }
-  for (const n of needed) {
-    const r = await fetch(`https://github.com/${owner}/${repo}/releases/download/${tag}/${n}?v=${Date.now()}`, { method: "HEAD", redirect: "follow" });
-    if (!r.ok) fail(`${n} não baixa (HTTP ${r.status}). O repositório está público?`);
-  }
-  console.log(`✓ Release ${tag} ok: ${needed.join(", ")}`);
-  console.log(`  ${rels[0].html_url}`);
+  console.log(`✓ Release ${tag} publicado e completo: ${rel.html_url}`);
 }
 
-(process.argv.includes("--verify") ? verify() : prepare()).catch(e => fail(e.message));
+(async () => {
+  if (!process.argv.includes("--verify")) pushTag();
+  await verify();
+})().catch(e => fail(e.message));

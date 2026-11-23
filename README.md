@@ -34,19 +34,24 @@ A atualização **não executa nenhum instalador**: ela troca só as pastas `res
 > **Assinatura digital:** para o Windows mostrar "Editor: Piphin Studio" e aceitar também o instalador, é preciso um certificado de assinatura de código (OV, a partir de ~US$ 216/ano; em nome da empresa exige CNPJ). O Azure Artifact Signing não está disponível para o Brasil.
 
 ### Publicar uma versão nova (para todos os PCs atualizarem)
-1. Aumente `"version"` em `desktop/package.json` (ex.: `1.2.0` → `1.3.0`) e atualize o `package-lock.json` com `npm install --package-lock-only` (o `release` confere).
-2. Faça commit e push, e crie a tag da versão: `git tag v1.3.0` e `git push origin v1.3.0`.
-3. Publique o Release (precisa de um token do GitHub com permissão de escrita no repositório, na variável `GH_TOKEN`):
+Tudo é montado e publicado pelo **GitHub Actions** (workflow *Release*, `.github/workflows/release.yml`) a partir da tag `vX.Y.Z`: o `.zip` portátil, o pacote de atualização (`app-patch-X.zip` + `patch.json`), o módulo da Arasaka Central e o instalador `LLM-Local-Setup-X.exe` + `latest.yml` (usados pelas versões antigas, até a 1.3.0). Antes, os testes rodam no Windows e no Linux. Não precisa de token nem de build no PC.
+
+**Pela Arasaka Central (mais fácil):** com o repositório clonado na pasta dos repositórios do Desenvolvedor (padrão `~/piphin`), abra **Desenvolvedor → Arasaka Mikoshi → Publicar**, digite a versão e as notas. A Central troca a versão em `desktop/package.json`, faz o commit, envia e cria a tag com as notas; o GitHub faz o resto.
+
+**À mão:**
+1. Aumente `"version"` em `desktop/package.json` (ex.: `1.2.0` → `1.3.0`), faça o commit e o push no `main`.
+2. Rode:
 ```
 cd desktop
-set GH_TOKEN=seu_token
 npm run release
 ```
-O comando confere a tag, cria **um único** Release **como rascunho**, gera o `.zip` portátil e o pacote de atualização (`app-patch-X.zip` + `patch.json`), e espera o **GitHub Actions** (workflow *Instalador Windows*, disparado pela tag) anexar o instalador `LLM-Local-Setup-X.exe` + `latest.yml`, que as versões antigas (até a 1.3.0) usam para se atualizar. O instalador é gerado na nuvem porque o Controle Inteligente de Aplicativos bloqueia o build dele no PC. Ele gera o pacote (`app-patch-X.zip` + `patch.json`), envia tudo e no fim verifica se tudo baixa. Ele cria o Release `v1.3.0` com os arquivos que o app usa para se atualizar (`latest.yml`, instalador e `.blockmap`).
+Ele cria e envia a tag e espera o Release ser publicado (uns 15 min), conferindo se todos os arquivos baixam. `npm run verify-release` só confere.
 
-O Release só é **publicado** no fim, quando todos os arquivos estão lá. Enquanto é rascunho, nem os apps nem a Arasaka Central o enxergam; antes da 1.32.0, um envio que falhava deixava a versão nova visível sem o módulo ("A versão não tem o arquivo esperado"). Os envios tentam de novo sozinhos e, se o `fetch` do Node cair, usam o `curl`. Se algo falhar, rode de novo `npm run release`: ele reaproveita o rascunho.
+O Release nasce como **rascunho** e só é publicado quando todos os arquivos estão lá: nem os apps nem a Central enxergam uma versão pela metade (até a 1.31.1, um envio que falhava no PC deixava a versão visível sem o módulo, e a Central dizia "A versão não tem o arquivo esperado"). Se o workflow falhar, corrija e rode de novo pelo GitHub (Actions → Release → *Run workflow*, com a tag e *Publicar* marcado): ele refaz o rascunho.
 
-O instalador gerado no GitHub Actions vem com **attestation** (prova de que saiu do workflow, sem modificações). Para conferir: `gh attestation verify LLM-Local-Setup-X.exe --repo Ruiso-Outside/ArasakaMikoshi`.
+Todos os arquivos vêm com **attestation** (prova de que saíram do workflow, sem modificações). Para conferir: `gh attestation verify piphin-module-llm-X.zip --repo Ruiso-Outside/ArasakaMikoshi`.
+
+Um push num branch `ci/...` roda o mesmo workflow **sem publicar** e guarda os arquivos montados (aba Actions → *Artifacts*), para testar o build.
 
 ### Gerar a versão portátil de novo, sem publicar
 ```
@@ -63,7 +68,7 @@ O Arasaka Mikoshi também roda **dentro do [Arasaka Central](https://github.com/
 - A configuração e a pasta de dados são as mesmas do app separado (`%APPDATA%\LLM Local\config.json`). Evite abrir os dois ao mesmo tempo: os atalhos ficam com quem abriu primeiro.
 - No Hub, "Iniciar com o Windows" é do Hub (o módulo só liga e desliga a opção dele) e as atualizações do módulo são feitas pelo Hub.
 
-`npm run module` gera `desktop\dist\piphin-module-llm-X.Y.Z.zip`; o `npm run dist` e o `npm run release` já o geram, e o `release` o envia ao Release junto com o pacote de atualização.
+`npm run module` gera `desktop\dist\piphin-module-llm-X.Y.Z.zip`; o `npm run dist` já o gera, e o workflow *Release* o publica junto com o pacote de atualização.
 
 ## Como usar
 

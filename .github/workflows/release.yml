@@ -1,0 +1,143 @@
+# Publica uma versão: tudo é montado aqui no GitHub Actions, a partir da tag vX.Y.Z.
+#   - pela Arasaka Central: Desenvolvedor → Arasaka Mikoshi → Publicar (troca a versão, faz o commit e envia a tag)
+#   - ou à mão: aumente "version" em desktop/package.json, faça o commit e rode  cd desktop && npm run release
+# Monta o .zip portátil, o pacote de atualização (app-patch + patch.json), o módulo da Central e o instalador NSIS,
+# com attestation de todos. O Release nasce como rascunho e só é publicado com todos os arquivos: nem os apps nem a
+# Central veem uma versão pela metade. Sem token no PC e sem depender do Node/antivírus de quem publica.
+# Rodar à mão (workflow_dispatch) com "publicar" desligado só monta e guarda os arquivos (para testar o build).
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+    branches: ["ci/**"]   # branch de teste: monta tudo, sem publicar
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag (ex.: v1.32.0). Vazio = só montar a versão do package.json, sem publicar"
+        required: false
+      publicar:
+        description: "Publicar o Release"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+  id-token: write      # attestation (gh attestation verify <arquivo> --repo Ruiso-Outside/ArasakaMikoshi)
+  attestations: write
+
+concurrency:
+  group: release-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  testes:
+    uses: ./.github/workflows/tests.yml
+
+  release:
+    needs: testes
+    runs-on: windows-latest
+    timeout-minutes: 45
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      TAG: ${{ inputs.tag || (github.ref_type == 'tag' && github.ref_name) || '' }}
+      PUBLISH: ${{ (github.event_name == 'push' && github.ref_type == 'tag') || inputs.publicar == true }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Versão
+        id: v
+        shell: bash
+        run: |
+          VERSION=$(node -p "require('./desktop/package.json').version")
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          if [ -n "$TAG" ] && [ "$TAG" != "v$VERSION" ]; then
+            echo "::error::A tag $TAG não bate com a versão do desktop/package.json ($VERSION)."; exit 1
+          fi
+          if [ "$PUBLISH" = "true" ] && [ -z "$TAG" ]; then echo "::error::Para publicar, informe a tag."; exit 1; fi
+          echo "Versão $VERSION · tag ${TAG:-(nenhuma)} · publicar: $PUBLISH"
+
+      - name: Dependências
+        working-directory: desktop
+        shell: bash
+        run: |
+          npm install --package-lock-only --no-audit --no-fund   # a Central só troca a versão do package.json
+          npm ci --no-audit --no-fund
+          node node_modules/electron/install.js
+
+      - name: App portátil (.zip)
+        working-directory: desktop
+        run: npx electron-builder --win --publish never
+
+      - name: Pacote de atualização e módulo da Central
+        working-directory: desktop
+        run: |
+          node scripts/make-patch.js
+          node scripts/make-module.js
+
+      - name: Instalador NSIS (versões antigas, até a 1.3.0, se atualizam por ele)
+        working-directory: desktop
+        run: npx electron-builder --win --config electron-builder-nsis.json --publish never
+
+      - name: Arquivos do Release
+        id: files
+        shell: bash
+        run: |
+          V=${{ steps.v.outputs.version }}
+          mkdir -p out
+          for f in "desktop/dist/LLM-Local-$V-win-x64.zip" "desktop/dist/app-patch-$V.zip" desktop/dist/patch.json \
+                   "desktop/dist/piphin-module-llm-$V.zip" desktop/dist-nsis/latest.yml \
+                   "desktop/dist-nsis/LLM-Local-Setup-$V.exe" "desktop/dist-nsis/LLM-Local-Setup-$V.exe.blockmap"; do
+            [ -f "$f" ] || { echo "::error::faltou $f"; exit 1; }
+            cp "$f" out/
+          done
+          # o módulo tem que trazer a versão certa e o servidor
+          python -c "import zipfile,json,sys; z=zipfile.ZipFile(sys.argv[1]); assert json.loads(z.read('./module.json'))['version']==sys.argv[2]; z.getinfo('./server/server.py')" "out/piphin-module-llm-$V.zip" "$V"
+          ls -la out
+
+      - name: Attestation
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: out/*
+
+      - name: Guardar os arquivos (sem publicar)
+        if: env.PUBLISH != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ steps.v.outputs.version }}
+          path: out/
+          retention-days: 7
+
+      - name: Publicar (rascunho → completo → publicado)
+        if: env.PUBLISH == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          V=${{ steps.v.outputs.version }}
+          if gh release view "$TAG" --json isDraft --jq .isDraft > draft.txt 2>/dev/null; then
+            if [ "$(cat draft.txt)" = "true" ]; then
+              echo "Rascunho anterior de $TAG encontrado: refazendo."; gh release delete "$TAG" --yes
+            else
+              echo "::error::O Release $TAG já está publicado. Para refazer, apague-o no GitHub ou aumente a versão."; exit 1
+            fi
+          fi
+          # notas: o texto da tag anotada (a Central põe as notas digitadas no Publicar)
+          gh release create "$TAG" --draft --verify-tag --title "$V" --notes-from-tag out/*
+          names=$(gh release view "$TAG" --json assets --jq '[.assets[] | select(.state == "uploaded") | .name] | join(",")')
+          for f in out/*; do
+            case ",$names," in *",$(basename "$f"),"*) ;; *) echo "::error::$(basename "$f") não subiu"; exit 1;; esac
+          done
+          gh release edit "$TAG" --draft=false --latest
+          for f in out/*; do
+            n=$(basename "$f")
+            code=$(curl -sL -o /dev/null -w '%{http_code}' "https://github.com/${{ github.repository }}/releases/download/$TAG/$n")
+            [ "$code" = "200" ] || { echo "::error::$n não baixa (HTTP $code)"; exit 1; }
+          done
+          echo "Release $TAG publicado: https://github.com/${{ github.repository }}/releases/tag/$TAG" >> "$GITHUB_STEP_SUMMARY"
