@@ -1116,7 +1116,8 @@ $("#mediaInfo").addEventListener("click", async e => {
 function renderTasks() {
   const html = S.status.tasks.map(t => {
     const pct = t.total ? Math.min(100, t.done / t.total * 100) : 0;
-    const info = t.status === "running" ? `${fmtSize(t.done)}${t.total ? " / " + fmtSize(t.total) + ` (${pct.toFixed(0)}%)` : ""} ${t.detail ? "· " + esc(t.detail) : ""}`
+    const info = t.status === "running" && t.kind === "tune" ? `${t.done} / ${t.total} ${t.detail ? "· " + esc(t.detail) : ""}`
+      : t.status === "running" ? `${fmtSize(t.done)}${t.total ? " / " + fmtSize(t.total) + ` (${pct.toFixed(0)}%)` : ""} ${t.detail ? "· " + esc(t.detail) : ""}`
       : t.status === "done" ? window.t("Concluído") : t.status === "cancelled" ? window.t("Cancelado") : window.t("Erro: {e}", { e: esc(t.error) });
     return `<div class="task ${t.status}"><div class="row between"><span>${esc(t.label)} <span class="muted">— ${info}</span></span>
       ${t.status === "running" ? `<button class="btn small" data-cancel="${t.id}">Cancelar</button>` : ""}</div>
@@ -1216,7 +1217,7 @@ async function loadLog() {
 const NUM_FIELDS = ["temperature", "top_p", "top_k", "min_p", "repeat_penalty", "max_tokens", "ctx_size", "gpu_layers", "cpu_percent",
   "search_results", "agent_max_steps", "image_steps", "extra_idle_minutes", "api_port"];
 const DEFAULTS = { system_prompt: "", temperature: 0.7, top_p: 0.95, top_k: 40, min_p: 0.05, repeat_penalty: 1.0, max_tokens: 0,
-  ctx_size: 8192, gpu_layers: 999, cpu_percent: 0, backend: "auto", extra_args: "", search_provider: "duckduckgo",
+  ctx_size: 8192, gpu_layers: 999, kv_cache: "f16", cpu_percent: 0, backend: "auto", extra_args: "", search_provider: "duckduckgo",
   search_region: "br-pt", search_results: 4, auto_load: true, agent_confirm_commands: true, agent_confirm_writes: false,
   agent_max_steps: 40, quick_model: "", quick_device: "gpu", quick_keep_loaded: true, vram_guard: true, rea_codex: true, mode_switch: true, api_enabled: false, api_port: 11434, api_require_key: false, reply_language: "auto", auto_summarize: true, use_recommended: true, extra_idle_minutes: 10, whisper_language: "auto", image_steps: 0, image_enhance: true, image_offload: true, image_unload_llm: false };
 function cpuLabel() {
@@ -1350,7 +1351,7 @@ $("#settingsForm").onsubmit = async e => {
     await api("/api/settings", { method: "PUT", body: data });
     $("#settingsModal").classList.remove("open");
     data.threads = 0; // a porcentagem de CPU substitui o antigo numero fixo de threads
-    const reloadKeys = ["ctx_size", "gpu_layers", "cpu_percent", "backend", "extra_args"];
+    const reloadKeys = ["ctx_size", "gpu_layers", "kv_cache", "cpu_percent", "backend", "extra_args"];
     const needReload = S.status.engine.state === "ready" && reloadKeys.some(k => String(old[k]) !== String(data[k]));
     toast(needReload ? "Salvo. Recarregue o modelo para aplicar contexto/GPU." : "Configurações salvas");
     if (!LANG_LOCKED && data.language && data.language !== LANG) return setTimeout(() => setLanguage(data.language), 600);

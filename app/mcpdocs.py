@@ -144,7 +144,7 @@ def docs_for(srv, ping=None):
 
 
 def prompt_block(servers, query, ping=None, budget=6000):
-    """Bloco para o prompt do sistema com os trechos relevantes de cada servidor (ou "")."""
+    """Bloco para o pedido do usuario com os trechos relevantes de cada servidor (ou "")."""
     parts = []
     for srv in servers:
         found = retrieve(docs_for(srv, ping), query, budget=budget)

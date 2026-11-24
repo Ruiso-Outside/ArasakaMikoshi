@@ -343,8 +343,14 @@
           </div></div>
           <div class="set-group"><h4>Carregamento</h4>
           <div class="grid">
-          <label>Contexto (tokens) <input name="ctx_size" type="number" step="any" min="512" max="1048576" class="input"></label>
-          <label>Camadas na GPU (999 = todas) <input name="gpu_layers" type="number" step="1" min="0" class="input"></label>
+          <label>Contexto (tokens) <input name="ctx_size" type="number" step="any" min="0" max="1048576" class="input">
+            <small class="muted">0 = automático: o maior em que cada modelo cabe inteiro na placa.</small></label>
+          <label>Camadas na GPU (999 = automático) <input name="gpu_layers" type="number" step="1" min="0" class="input">
+            <small class="muted">No automático, o que não couber na placa fica na RAM.</small></label>
+          <label>Cache do contexto
+            <select name="kv_cache" class="input"><option value="f16">Normal</option><option value="q8_0">8 bits (quase metade da memória)</option></select>
+            <small class="muted">Em 8 bits cabe mais contexto na placa; pode perder um pouco de qualidade e ler o prompt mais devagar, principalmente sem placa de vídeo.</small>
+          </label>
           <label>Uso da CPU <span id="cpuLabel" class="muted"></span>
             <input name="cpu_percent" id="cpuRange" type="range" min="0" max="100" step="5" class="range">
             <small class="muted">0 = automático (o runtime usa os núcleos físicos, cerca de 50%). Acima de 75% raramente acelera e deixa o PC lento.</small>
@@ -510,14 +516,19 @@
       <p class="muted small-note" id="msFamily"></p>
       <p class="muted small-note">Deixe um campo vazio para usar o valor recomendado (ou o das configurações globais). Contexto e camadas na GPU valem ao carregar o modelo.</p>
       <form id="msForm" class="grid">
-        <label>Contexto (tokens) <input name="ctx_size" type="number" step="any" min="512" max="1048576" class="input"></label>
-        <label>Camadas na GPU (999 = todas) <input name="gpu_layers" type="number" step="1" min="0" class="input"></label>
+        <label>Contexto (tokens) <input name="ctx_size" type="number" step="any" min="0" max="1048576" class="input"></label>
+        <label>Camadas na GPU (999 = automático) <input name="gpu_layers" type="number" step="1" min="0" class="input"></label>
+        <label>Cache do contexto <select name="kv_cache" class="input"><option value="">Padrão</option><option value="f16">Normal</option><option value="q8_0">8 bits (quase metade da memória)</option></select></label>
+        <label>Lote de leitura <input name="ubatch" type="number" step="1" min="0" max="8192" class="input" placeholder="512"></label>
         <label>Temperatura <input name="temperature" type="number" step="any" min="0" max="5" class="input"></label>
         <label>Top P <input name="top_p" type="number" step="any" min="0" max="1" class="input"></label>
         <label>Top K <input name="top_k" type="number" step="1" min="0" class="input"></label>
         <label>Min P <input name="min_p" type="number" step="any" min="0" max="1" class="input"></label>
         <label>Penalidade de repetição <input name="repeat_penalty" type="number" step="any" min="0" max="5" class="input"></label>
       </form>
+      <p class="muted small-note" id="msFit"></p>
+      <div id="msBench"></div>
+      <div class="row"><button type="button" class="btn" id="msTune" title="Mede o modelo neste PC e guarda o ajuste mais rápido. Leva alguns minutos.">⚡ Otimizar para este PC</button></div>
       <div class="row end">
         <button type="button" class="btn" id="msUseRec">Preencher com os recomendados</button>
         <button type="button" class="btn" id="msClear">Limpar (usar padrões)</button>

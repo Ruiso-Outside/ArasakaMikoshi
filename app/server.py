@@ -36,13 +36,17 @@ import mcp
 import modelsettings
 import train
 import gateway
+import gguf
 import rea
 import catalog
 import media
 import nettls
+import promptcache
 import sprites
 import strata
+import tune
 import websearch
+import winrt
 
 # LLM_HOME: pasta de dados (modelos, motor, conversas). O app desktop define isso.
 ROOT = Path(os.environ.get("LLM_HOME") or Path(__file__).resolve().parent.parent)
@@ -67,6 +71,7 @@ ENGINE_KEY = secrets.token_urlsafe(24)
 ENGINE_HEADERS = {"Content-Type": "application/json", "Authorization": f"Bearer {ENGINE_KEY}"}
 UA = "LLM-Local/1.0"
 BACKENDS = ("cuda", "vulkan", "cpu")
+BENCH_FILE = DATA / "bench.json"  # medidas do Otimizar, por modelo
 
 for d in (MODELS, ENGINE, CHATS):
     d.mkdir(parents=True, exist_ok=True)
@@ -79,8 +84,10 @@ DEFAULT_SETTINGS = {
     "min_p": 0.05,
     "repeat_penalty": 1.0,
     "max_tokens": 0,  # 0 = sem limite
-    "ctx_size": 8192,
-    "gpu_layers": 999,  # 999 = tudo na GPU
+    "ctx_size": 8192,  # 0 = automatico: o maior em que cada modelo cabe inteiro na placa
+    "gpu_layers": 999,  # 999 = tudo o que couber na GPU (o resto vai para a RAM, escolhido pelo llama.cpp)
+    "kv_cache": "f16",  # cache do contexto: f16 (normal) | q8_0 (8 bits: quase metade da memoria)
+    "ubatch": 0,  # lote de leitura do prompt (0 = padrao do motor, 512); o Otimizar ajusta por modelo
     "threads": 0,  # (antigo) numero fixo de threads; 0 = usa cpu_percent
     "cpu_percent": 0,  # 0 = automatico (llama.cpp usa os nucleos fisicos, ~50%)
     "backend": "auto",
@@ -659,46 +666,8 @@ def _job_object():
 
 
 def gguf_context_length(path):
-    """Contexto maximo de treino gravado no GGUF (<arquitetura>.context_length); 0 se nao der para ler.
-    Le so o cabecalho: as chaves de arquitetura vem antes das listas grandes do tokenizador."""
-    import struct
-    sizes = {0: 1, 1: 1, 2: 2, 3: 2, 4: 4, 5: 4, 6: 4, 7: 1, 10: 8, 11: 8, 12: 8}
-    ints = {0: "<B", 1: "<b", 2: "<H", 3: "<h", 4: "<I", 5: "<i", 10: "<Q", 11: "<q"}
-    try:
-        with open(path, "rb") as f:
-            if f.read(4) != b"GGUF":
-                return 0
-            version = struct.unpack("<I", f.read(4))[0]
-            if version < 2:
-                return 0
-            _tensors, kv_count = struct.unpack("<QQ", f.read(16))
-
-            def skip(t):
-                if t in sizes:
-                    f.seek(sizes[t], 1)
-                elif t == 8:
-                    f.seek(struct.unpack("<Q", f.read(8))[0], 1)
-                elif t == 9:
-                    it, n = struct.unpack("<IQ", f.read(12))
-                    if it in sizes:
-                        f.seek(sizes[it] * n, 1)
-                    else:
-                        for _ in range(n):
-                            skip(it)
-                else:
-                    raise ValueError("tipo desconhecido")
-            for _ in range(min(kv_count, 100000)):
-                n = struct.unpack("<Q", f.read(8))[0]
-                if n > 65536:  # arquivo corrompido ou que nao e GGUF
-                    return 0
-                key = f.read(n).decode("utf-8", "replace")
-                t = struct.unpack("<I", f.read(4))[0]
-                if key.endswith(".context_length") and t in ints:
-                    return int(struct.unpack(ints[t], f.read(sizes[t]))[0])
-                skip(t)
-    except (OSError, ValueError, struct.error):
-        pass
-    return 0
+    """Contexto maximo de treino gravado no GGUF (<arquitetura>.context_length); 0 se nao der para ler."""
+    return gguf.context_length(path)
 
 
 # erro de memoria ao criar o cache do contexto (CUDA, Vulkan, Metal): da para tentar de novo com menos contexto
@@ -745,8 +714,9 @@ class EngineProcess:
             except subprocess.TimeoutExpired:
                 p.kill()
 
-    def start(self, model_rel, s, device=None, embed=False, no_mtp=False, ctx=None):
-        """ctx: contexto ja ajustado (nova tentativa depois de faltar memoria); None = o das configuracoes."""
+    def start(self, model_rel, s, device=None, embed=False, no_mtp=False, ctx=None, kv=None):
+        """ctx: contexto ja ajustado (nova tentativa depois de faltar memoria); None = o das configuracoes.
+        kv: tipo do cache do contexto ja ajustado (o motor recusou o de 8 bits); None = o das configuracoes."""
         if strata.parse_id(model_rel):
             return self.start_strata(model_rel, s.get("strata_context", ""))
         self._args = (model_rel, dict(s), device, embed, no_mtp)
@@ -756,8 +726,12 @@ class EngineProcess:
         if not embed:
             s = model_effective(model_rel, s)  # ajustes proprios do modelo (contexto, GPU)
         s = dict(s)
+        self._kv = kv
+        kv_type = kv or (s.get("kv_cache") if s.get("kv_cache") in modelsettings.KV_TYPES else "f16")
         if ctx is None:
             self.notice = ""
+            if int(s["ctx_size"]) <= 0:  # automatico: o maior que cabe inteiro na placa
+                s["ctx_size"] = auto_context(model_rel, kv_type)
             self.ctx_requested = int(s["ctx_size"])
             # mais contexto que o de treino nao serve para nada e so gasta VRAM (ex.: 720000 num modelo de 262144)
             train = gguf_context_length(model_path) if model_path.is_file() else 0
@@ -782,10 +756,16 @@ class EngineProcess:
         if self is ENGINE_PROC and not on_cpu:
             POOL.make_room_for_main(model_rel)  # o principal tem prioridade na VRAM
         ngl = "0" if on_cpu else str(int(s["gpu_layers"]))
-        if device == "gpu" and self is not ENGINE_PROC and int(s["gpu_layers"]) >= 999:
-            ngl = "auto"  # extra na GPU: tudo que couber na VRAM livre de verdade (o resto fica na RAM)
+        if not on_cpu and int(s["gpu_layers"]) >= 999:
+            ngl = "auto"  # tudo que couber na VRAM livre de verdade; o resto fica na RAM (um numero fixo desliga esse encaixe)
         cmd = [backs[backend]["exe"], "-m", str(model_path), "--host", "127.0.0.1", "--port", str(self.port),
                "-c", str(int(s["ctx_size"])), "-ngl", ngl, "--jinja", "--api-key", ENGINE_KEY]
+        if not embed and kv_type != "f16":
+            cmd += ["-ctk", kv_type, "-ctv", kv_type]
+        if not embed and int(s.get("ubatch") or 0) > 0:
+            cmd += ["-ub", str(int(s["ubatch"])), "-b", str(max(2048, int(s["ubatch"])))]
+        if ngl == "auto" and backend != "cpu" and ctx is None and not embed:
+            self.notice = " ".join(filter(None, [self.notice, vram_notice(model_rel, int(s["ctx_size"]), kv_type)]))
         if on_cpu:
             cmd += ["--device", "none"]  # CPU e RAM apenas, sem tocar na GPU
         if embed:
@@ -822,6 +802,7 @@ class EngineProcess:
             self.proc, self.model, self.backend, self.state, self.error = proc, model_rel, backend, "loading", ""
             self.mtp, self.accel = bool(kind), kind
             self.ctx_used = int(s["ctx_size"])
+            self.kv_type = "f16" if embed else kv_type
             self.device = "cpu" if on_cpu or backend == "cpu" or int(s["gpu_layers"]) == 0 else "gpu"
         threading.Thread(target=self._read_output, args=(proc,), daemon=True).start()
         threading.Thread(target=self._wait_ready, args=(proc,), daemon=True).start()
@@ -883,12 +864,18 @@ class EngineProcess:
             time.sleep(0.1 if time.monotonic() - started < 3 else 0.5)
         model_rel, s, device, embed, no_mtp = self._args
         used = getattr(self, "ctx_used", 0)
+        hint = winrt.crash_hint(proc.poll()) if proc is self.proc else ""
+        if hint:  # o Visual C++ do Windows e antigo: tentar de novo nao adianta
+            diag_log(f"motor nao abriu ({self.backend}): Visual C++ antigo {winrt.vc_runtime_version()}")
+            self.log.append(hint)
+            self.state, self.error = "error", hint
+            return
         if proc is self.proc and used > MIN_FIT_CTX and any(KV_OOM_RE.search(l) for l in list(self.log)[-40:]):
             # o cache do contexto nao coube na placa: tenta de novo com metade (sem mudar as configuracoes)
             new = max(MIN_FIT_CTX, (used // 2) // 1024 * 1024)
             asked = self.ctx_requested or used
             try:
-                self.start(model_rel, s, device, embed, no_mtp=no_mtp, ctx=new)
+                self.start(model_rel, s, device, embed, no_mtp=no_mtp, ctx=new, kv=self._kv)
                 self.notice = (f"Contexto reduzido de {asked} para {new} tokens para caber na memória da placa de vídeo. "
                                "Para não esperar as tentativas, ajuste em Configurações → Modelo e runtime.")
                 self.log.append(f"[Arasaka Mikoshi] Faltou memória para {used} tokens de contexto; tentando com {new}.")
@@ -896,11 +883,20 @@ class EngineProcess:
                 return
             except (ValueError, OSError):
                 pass
+        if proc is self.proc and getattr(self, "kv_type", "f16") != "f16":
+            # ha modelos e placas em que o motor recusa o cache em 8 bits: volta para o normal
+            try:
+                self.start(model_rel, s, device, embed, no_mtp=no_mtp, ctx=used or None, kv="f16")
+                self.notice = "O motor não aceitou o cache de contexto em 8 bits com este modelo; carregado com o normal."
+                self.log.append("[Arasaka Mikoshi] " + self.notice)
+                return
+            except (ValueError, OSError):
+                pass
         if proc is self.proc and getattr(self, "mtp", False):
             # o motor nao aceitou o acelerador MTP (versao antiga ou arquivo incompativel): tenta sem ele
             note = "[Arasaka Mikoshi] O runtime falhou com o speculative decoding; carregando sem ele."
             try:
-                self.start(model_rel, s, device, embed, no_mtp=True, ctx=used or None)
+                self.start(model_rel, s, device, embed, no_mtp=True, ctx=used or None, kv=self._kv)
                 self.log.append(note)
                 self.mtp_error = True
                 return
@@ -926,6 +922,7 @@ class EngineProcess:
             self.state, self.error = "error", "O motor fechou inesperadamente (veja o log)."
         return {"state": self.state, "model": self.model, "backend": self.backend, "error": self.error,
                 "label": strata.label(self.model) if self.backend == "strata" else "",
+                "kv_cache": getattr(self, "kv_type", "f16"),
                 "port": self.port, "n_ctx": self.n_ctx, "ctx_requested": self.ctx_requested, "notice": self.notice,
                 "mtp": self.mtp, "mtp_error": self.mtp_error, "accel": self.accel,
                 "vision": self.state == "ready" and self.modalities.get("vision", False),
@@ -1205,8 +1202,128 @@ MEDIA_DIRS = ("image", "whisper", "mmproj", "embed", "mtp")
 
 def model_recommended(rel):
     info = load_model_info().get(rel) or catalog.model_caps({"id": Path(rel).name})
-    return modelsettings.recommended(rel, [c["key"] for c in info.get("caps", [])], info.get("ctx_n", 0),
-                                     model_bytes(rel), GPU.get("vram_mb", 0) * 2 ** 20)
+    rec, family = modelsettings.recommended(rel, [c["key"] for c in info.get("caps", [])], info.get("ctx_n", 0),
+                                            model_bytes(rel), GPU.get("vram_mb", 0) * 2 ** 20)
+    fit = fit_context(rel)
+    if fit is not None:  # conta de verdade, pela arquitetura do modelo
+        rec["ctx_size"] = fit or gguf.CTX_STEPS[0]
+    return rec, family
+
+
+def extra_bytes(rel):
+    """O que carrega junto do modelo na placa: projetor de visao e acelerador (MTP ou rascunho)."""
+    _, accel = accel_for(rel)
+    return gguf.size_of(mmproj_for(rel)) + gguf.size_of(accel)
+
+
+def fit_context(rel, kv_type="", free=None):
+    """Maior contexto em que o modelo cabe inteiro na placa (0 = nao cabe; None = nao da para estimar)."""
+    if not rel or strata.parse_id(rel) or not GPU.get("vram_mb"):
+        return None
+    if not kv_type:
+        kv_type = modelsettings.get(rel).get("kv_cache") or load_settings().get("kv_cache") or "f16"
+    return gguf.best_context(gguf.read_meta(MODELS / rel), model_bytes(rel), extra_bytes(rel), GPU["vram_mb"] * 2 ** 20, kv_type, free)
+
+
+def auto_context(rel, kv_type):
+    """Contexto automatico (ctx_size 0). Um modelo maior que a placa fica com 16 mil: parte dele roda na RAM de qualquer jeito."""
+    fit = fit_context(rel, kv_type)
+    train = gguf_context_length(MODELS / rel) or gguf.CTX_STEPS[-1]
+    if fit is None:
+        return min(train, 8192)
+    return min(train, fit or 16384)
+
+
+def vram_notice(rel, ctx, kv_type):
+    """Aviso quando o modelo nao vai caber inteiro na VRAM livre agora (contexto grande ou um jogo aberto)."""
+    sample = gpu_sample()
+    need = gguf.needed(gguf.read_meta(MODELS / rel), model_bytes(rel), extra_bytes(rel), ctx, kv_type)
+    if not sample or not need:
+        return ""
+    free = (sample[1] - sample[0]) * 2 ** 20
+    if need + gguf.MARGIN <= free:
+        return ""
+    fit = fit_context(rel, kv_type, free)
+    tip = (f" Com contexto de até {fit} tokens ele caberia inteiro." if fit and fit < ctx else
+           " Feche programas que usam a placa (jogos) ou use um modelo menor.")
+    return (f"Parte do modelo vai para a RAM (mais lento): com {ctx} tokens de contexto ele precisa de cerca de "
+            f"{need / gguf.GIB:.1f} GB e a placa tem {free / gguf.GIB:.1f} GB livres.{tip}")
+
+
+def load_bench():
+    try:
+        return json.loads(BENCH_FILE.read_text("utf-8"))
+    except (OSError, ValueError):
+        return {}
+
+
+def tune_model(task, rel):
+    """Mede o modelo com o llama-bench e guarda o ajuste mais rapido (ver tune.py)."""
+    s = model_effective(rel, load_settings())
+    backs = installed_backends()
+    backend = s.get("backend", "auto")
+    if backend not in backs:
+        backend = next((b for b in BACKENDS if b in backs), "")
+    exe = tune.bench_exe(backs[backend]["exe"]) if backend else None
+    if not exe:
+        raise ValueError("O motor instalado não traz o llama-bench. Atualize o motor em Modelos → Runtime.")
+    if ENGINE_PROC.backend == "strata" and ENGINE_PROC.state != "stopped":
+        raise ValueError("Descarregue o Strata antes de otimizar.")
+    if ENGINE_PROC.busy or any(e.busy for e in POOL.extra.values()):
+        raise ValueError("Espere a resposta atual terminar antes de otimizar.")
+    before = ENGINE_PROC.model if ENGINE_PROC.state in ("ready", "loading") else ""
+    rows, code, tail = [], 0, ""
+    try:
+        ENGINE_PROC.stop()
+        POOL.stop()
+        gpu = backend != "cpu" and int(s["gpu_layers"]) > 0
+        if gpu:
+            time.sleep(1.5)  # o driver devolve a VRAM do modelo descarregado
+            sample = gpu_sample()
+            if sample and sample[1] and sample[0] > sample[1] * tune.BUSY_SHARE:
+                raise ValueError(f"A placa já tem {sample[0] / 1024:.1f} GB ocupados por outros programas (um jogo aberto?). "
+                                 "Feche-os e tente de novo: a medida sairia errada.")
+        ctx = int(s["ctx_size"]) or auto_context(rel, "f16")
+        ctx = min(ctx, gguf_context_length(MODELS / rel) or ctx)
+        plan = [(u, "f16") for u in tune.UBATCHES] + [(512, "q8_0")]
+        task["total"] = len(plan)
+
+        def should_stop():
+            if task["cancel"]:
+                raise Cancelled()
+            if ENGINE_PROC.state in ("ready", "loading"):
+                raise ValueError("Um modelo foi carregado durante o teste. Tente de novo sem usar a IA.")
+
+        def own(p):
+            if ENGINE_PROC.job:  # fecha junto com o app
+                try:
+                    ENGINE_PROC.job[0].AssignProcessToJobObject(ENGINE_PROC.job[1], int(p._handle))
+                except Exception:  # noqa: BLE001
+                    pass
+
+        for n, (ub, kv) in enumerate(plan):
+            task["detail"] = f"lote {ub}" + (", cache em 8 bits" if kv != "f16" else "")
+            res, code, tail = tune.run_one(tune.command(exe, MODELS / rel, ctx, ub, kv, cpu_threads(s), gpu), should_stop, own)
+            task["done"] = n + 1
+            if res:
+                rows.append({"ubatch": ub, "kv": kv, **res})
+            elif not rows:
+                break  # nem o padrao rodou
+        if not rows:
+            raise ValueError(winrt.crash_hint(code) or "O teste não rodou com este modelo. " + tail.strip()[-300:])
+        best, values = tune.choose(rows)
+        saved = {k: v for k, v in modelsettings.get(rel).items() if k not in ("ubatch", "kv_cache")}
+        modelsettings.save(rel, {**saved, **values} or None)
+        doc = load_bench()
+        doc[rel] = {"at": time.time(), "backend": backend, "version": backs[backend].get("version", ""), "ctx": ctx, "rows": rows, "best": best}
+        BENCH_FILE.write_text(json.dumps(doc, ensure_ascii=False, indent=1), "utf-8")
+        task["detail"] = f"{best['tg']:.0f} tok/s"
+    finally:
+        if before and ENGINE_PROC.state == "stopped":
+            try:
+                ENGINE_PROC.start(before, load_settings())
+            except (ValueError, OSError):
+                pass
 
 
 def model_effective(rel, s):
@@ -1585,8 +1702,14 @@ def text_of(content):
     return content or ""
 
 
-def build_history(msgs, mod, agent_mode=False):
+def build_history(msgs, mod, agent_mode=False, budget=0):
+    """budget (Codex): enquanto o historico couber nestes caracteres, nada e encurtado. Encurtar a resposta antiga a cada
+    pedido mudava o comeco da conversa e fazia o motor reler tudo."""
     out, n = [], len(msgs)
+    if agent_mode and budget:
+        full = promptcache.text_len([x for m in msgs for x in (m.get("trace") or [m])])
+        if full <= budget:
+            n = 0  # todas as respostas entram inteiras
     for i, m in enumerate(msgs):
         role = m.get("role")
         if role == "system":

@@ -43,6 +43,7 @@ import server  # noqa: E402
 
 FAKE = str(TESTS / "fake_llama.py")
 FAKE_SD = str(TESTS / "fake_sd.py")
+FAKE_BENCH = str(TESTS / "fake_bench.py")
 if os.environ.get("FAKE_SD") == "1":  # setor Sprites: motor de imagem falso e o modelo de pixel art "baixado"
     exe = HOME / "engine" / "sd" / ("sd-cli.exe" if os.name == "nt" else "sd-cli")
     exe.parent.mkdir(parents=True, exist_ok=True)
@@ -61,12 +62,15 @@ def popen(cmd, *a, **kw):
     if isinstance(cmd, list) and cmd and cmd[0] == "FAKE_LLAMA":
         cmd = [sys.executable, FAKE] + cmd[1:]
         kw["cwd"] = str(TESTS)
+    elif isinstance(cmd, list) and cmd and cmd[0] == "FAKE_BENCH":
+        cmd = [sys.executable, FAKE_BENCH] + cmd[1:]
     elif isinstance(cmd, list) and cmd and Path(str(cmd[0])).name.startswith("sd-cli"):
         cmd = [sys.executable, FAKE_SD] + cmd[1:]
     return _Popen(cmd, *a, **kw)
 
 
 server.subprocess.Popen = popen
+server.tune.bench_exe = lambda exe: "FAKE_BENCH"
 server.GPU = {"vendor": "nvidia", "name": "teste", "vram_mb": 16303}
 server.gpu_sample = lambda: None  # nao le a placa de verdade (a protecao de VRAM nao age nos testes)
 server.main()

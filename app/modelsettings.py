@@ -8,7 +8,8 @@ import re
 from pathlib import Path
 
 FILE = None
-LOAD_KEYS = ("ctx_size", "gpu_layers")
+LOAD_KEYS = ("ctx_size", "gpu_layers", "kv_cache", "ubatch")
+KV_TYPES = ("f16", "q8_0")  # cache do contexto: normal ou 8 bits
 SAMPLING_KEYS = ("temperature", "top_p", "top_k", "min_p", "repeat_penalty")
 KEYS = LOAD_KEYS + SAMPLING_KEYS
 
@@ -40,7 +41,11 @@ def save(rel, values):
             v = values.get(k)
             if v in (None, ""):
                 continue
-            clean[k] = int(float(v)) if k in ("ctx_size", "gpu_layers", "top_k") else round(float(v), 4)
+            if k == "kv_cache":
+                if v in KV_TYPES:
+                    clean[k] = v
+                continue
+            clean[k] = int(float(v)) if k in ("ctx_size", "gpu_layers", "top_k", "ubatch") else round(float(v), 4)
         if clean:
             d[rel] = clean
         else:

@@ -11,15 +11,34 @@ async function openModelSettings(path) {
   $("#msFamily").textContent = t("Família detectada: {f}", { f: t(r.family) }) + (r.family === "Genérico" ? " · " + t("sem recomendação específica (valem as configurações globais)") : "");
   for (const el of $("#msForm").elements) {
     el.value = r.settings[el.name] ?? "";
-    el.placeholder = r.recommended[el.name] != null ? String(r.recommended[el.name]) : "";
+    if (el.name !== "ubatch") el.placeholder = r.recommended[el.name] != null ? String(r.recommended[el.name]) : "";
   }
+  $("#msFit").textContent = r.fit_ctx == null ? "" : r.fit_ctx ? t("Cabe inteiro na placa com contexto de até {n} tokens (estimativa).", { n: r.fit_ctx.toLocaleString(LANG) })
+    : t("Não cabe inteiro na placa: parte do modelo roda na RAM (estimativa).");
+  $("#msBench").innerHTML = benchHTML(r.bench);
   openModal("modelSettingsModal");
 }
+function benchHTML(b) {
+  if (!b?.rows?.length) return "";
+  const same = (x, y) => x.ubatch === y.ubatch && x.kv === y.kv;
+  return `<div class="tbl"><table><thead><tr><th>${esc(t("Ajuste medido"))}</th><th>${esc(t("Leitura"))}</th><th>${esc(t("Escrita"))}</th></tr></thead><tbody>` +
+    b.rows.map(x => `<tr><td>${same(x, b.best) ? "⭐ " : ""}${esc(t("lote {n}", { n: x.ubatch }))}${x.kv !== "f16" ? " · " + esc(t("8 bits")) : ""}</td><td>${esc(x.pp)} tok/s</td><td>${esc(x.tg)} tok/s</td></tr>`).join("") + "</tbody></table></div>";
+}
+$("#msTune").onclick = async () => {
+  if (!confirm(t("O teste descarrega os modelos e usa a placa por alguns minutos. Feche jogos antes. Começar?"))) return;
+  try {
+    await post("/api/models/tune", { model: MS.model });
+    $("#modelSettingsModal").classList.remove("open");
+    openModal("modelsModal");
+    toast(t("Teste iniciado. O andamento aparece em Modelos."), 5000);
+    refreshStatus();
+  } catch (e) { toast(e.message, 6000); }
+};
 $("#msUseRec").onclick = () => { for (const el of $("#msForm").elements) if (MS.rec?.[el.name] != null) el.value = MS.rec[el.name]; };
 $("#msClear").onclick = () => { for (const el of $("#msForm").elements) el.value = ""; };
 $("#msSave").onclick = async () => {
   if (!$("#msForm").reportValidity()) return;
-  const vals = {}; for (const el of $("#msForm").elements) if (el.value !== "") vals[el.name] = Number(el.value);
+  const vals = {}; for (const el of $("#msForm").elements) if (el.value !== "") vals[el.name] = el.tagName === "SELECT" ? el.value : Number(el.value);
   try {
     await api("/api/models/settings", { method: "PUT", body: { model: MS.model, settings: Object.keys(vals).length ? vals : null } });
     $("#modelSettingsModal").classList.remove("open");

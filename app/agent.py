@@ -18,6 +18,7 @@ from pathlib import Path
 
 import mcp
 import mcpdocs
+import promptcache
 import rea
 
 NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
@@ -615,11 +616,13 @@ class AgentRun:
         if docs:
             self.send({"agent": {"type": "notice", "text": "📖 Documentação do Construct consultada para este pedido"}})
         sp = (system_prompt(ws.root, bool(self.image_fn)) if ws else system_prompt_mcp_only()) + \
-            mcp_prompt(servers, bool(ws)) + docs + ("\n\n" + rea.cli_prompt() if rea_cli else "") + \
+            mcp_prompt(servers, bool(ws)) + ("\n\n" + rea.cli_prompt() if rea_cli else "") + \
             (f"\n\nBase de conhecimento \"{self.kb_name}\": use search_knowledge para consultar os documentos do usuario "
              "antes de implementar e quando precisar de detalhes. Cite os trechos usados como [D1], [D2]." if self.kb_fn else "") + \
             ("\n" + self.s["_reply_rule"] if self.s.get("_reply_rule") else "")
-        messages = [{"role": "system", "content": sp}] + history
+        # a documentacao muda a cada pedido: no prompt do sistema (o comeco), ela fazia o motor reler a conversa inteira
+        turn = promptcache.prepend(history, docs.strip() + "\n\nPedido do usuario:\n") if docs else history
+        messages = [{"role": "system", "content": sp}] + promptcache.MEMORY.stabilize(history, turn, self.s.get("_n_ctx"))
         trace, last_timings = [], None
         max_steps = max(1, min(int(self.s.get("agent_max_steps") or 40), 200))
         for step in range(max_steps):

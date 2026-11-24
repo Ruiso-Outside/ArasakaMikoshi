@@ -590,6 +590,64 @@ class ServerTest(unittest.TestCase):
             self.call("/api/load", {"model": model})
             wait_ready()
 
+    def _ready(self, model):
+        for _ in range(200):
+            e = self.call("/api/status")["engine"]
+            if e["state"] == "error" or (e["state"] == "ready" and e["model"] == model):
+                return e
+            time.sleep(0.1)
+        self.fail("o modelo não carregou")
+
+    def _say(self):
+        return self.text_of(self.sse("/api/chat", {"messages": [{"role": "user", "content": "oi"}]}))
+
+    def test_20_fit_and_8bit_cache(self):
+        qwen, gemma = "Qwen3-8B-Q4_K_M.gguf", "gemma-3-4b-it-Q4_K_M.gguf"
+        try:
+            self.call("/api/load", {"model": qwen})
+            self._ready(qwen)
+            self.assertIn("ngl=auto kv=- ub=-", self._say(), "999 = o llama.cpp encaixa na placa")
+            self.call("/api/settings", {"kv_cache": "q8_0"}, "PUT")
+            self.call("/api/load", {"model": qwen})
+            self.assertEqual(self._ready(qwen)["kv_cache"], "q8_0")
+            self.assertIn("kv=q8_0", self._say())
+            self.call("/api/load", {"model": gemma})  # o motor recusa o cache em 8 bits com este: volta para o normal
+            e = self._ready(gemma)
+            self.assertEqual((e["state"], e["kv_cache"]), ("ready", "f16"), e["error"])
+            self.assertIn("8 bits", e["notice"])
+            self.call("/api/settings", {"kv_cache": "f16", "gpu_layers": 20, "ctx_size": 0}, "PUT")
+            self.call("/api/load", {"model": qwen})
+            self.assertEqual(self._ready(qwen)["n_ctx"], 8192, "automático sem dados do arquivo: 8192")
+            self.assertIn("ngl=20", self._say(), "um número escolhido pela pessoa continua valendo")
+        finally:
+            self.call("/api/settings", {"kv_cache": "f16", "gpu_layers": 999, "ctx_size": 8192}, "PUT")
+            self.call("/api/load", {"model": qwen})
+            self._ready(qwen)
+
+    def test_21_tune(self):
+        qwen = "Qwen3-8B-Q4_K_M.gguf"
+        self.call("/api/models/settings", {"model": qwen, "settings": {"temperature": 0.5}}, "PUT")
+        try:
+            tid = self.call("/api/models/tune", {"model": qwen})["id"]
+            for _ in range(200):
+                t = next(x for x in self.call("/api/status")["tasks"] if x["id"] == tid)
+                if t["status"] != "running":
+                    break
+                time.sleep(0.1)
+            self.assertEqual(t["status"], "done", t["error"])
+            r = self.call("/api/models/settings?model=" + qwen)
+            self.assertEqual(r["settings"], {"temperature": 0.5, "ubatch": 1024}, "guarda o ajuste e mantém os da pessoa")
+            self.assertEqual([x["ubatch"] for x in r["bench"]["rows"]], [512, 1024, 512], "a configuração que não coube ficou de fora")
+            self._ready(qwen)  # o modelo que estava carregado volta, já com o ajuste
+            self.assertIn("ub=1024", self._say())
+            with self.assertRaises(urllib.error.HTTPError) as cm:
+                self.call("/api/models/tune", {"model": "../fora.gguf"})
+            self.assertEqual(cm.exception.code, 404)
+        finally:
+            self.call("/api/models/settings", {"model": qwen, "settings": None}, "PUT")
+            self.call("/api/load", {"model": qwen})
+            self._ready(qwen)
+
     def test_12_summarize_and_backup(self):
         r = self.call("/api/summarize", {"messages": [{"role": "user", "content": "a"}, {"role": "assistant", "content": "b"}]})
         self.assertIn("Resumo", r["summary"])

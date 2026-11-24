@@ -95,7 +95,18 @@ class ApiRoutes:
     def get_api_models_settings(self, p, q):
         rel = q.get("model", [""])[0]
         rec, family = S.model_recommended(rel)
-        return self.send_json({"settings": modelsettings.get(rel), "recommended": rec, "family": family})
+        return self.send_json({"settings": modelsettings.get(rel), "recommended": rec, "family": family,
+                               "fit_ctx": S.fit_context(rel), "bench": S.load_bench().get(rel)})
+
+    def post_api_models_tune(self, p, b):
+        rel = b.get("model", "")
+        if rel not in {m["path"] for m in S.list_models()}:
+            return self.send_json({"error": "Modelo nao encontrado."}, 404)
+        if any(t["kind"] == "tune" and t["status"] == "running" for t in S.public_tasks()):
+            return self.send_json({"error": "Já há um teste em andamento."}, 409)
+        t = S.new_task("tune", "Otimizar " + S.model_display(rel))
+        S.run_task(t, lambda task: S.tune_model(task, rel))
+        return self.send_json({"id": t["id"]})
 
     def get_api_codex_diff(self, p, q):
         d = self.checkpoint_dir(q.get("chat_id", [""])[0], q.get("run_id", [""])[0])
@@ -490,6 +501,7 @@ POST_ROUTES = {
     "/api/models/mtp": ApiRoutes.post_api_models_mtp,
     "/api/models/mmproj": ApiRoutes.post_api_models_mmproj,
     "/api/load": ApiRoutes.post_api_load,
+    "/api/models/tune": ApiRoutes.post_api_models_tune,
     "/api/unload": ApiRoutes.post_api_unload,
     "/api/engine/install": ApiRoutes.post_api_engine_install,
     "/api/strata/install": ApiRoutes.post_api_strata_install,

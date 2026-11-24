@@ -16,6 +16,7 @@ import agents
 import kb
 import mcp
 import media
+import promptcache
 import websearch
 
 import server as S  # noqa: E402  (importado pelo proprio server; usado so dentro dos metodos)
@@ -87,7 +88,7 @@ class ChatRoutes:
             return messages
         self.sse({"llmlocal": {"stage": "read", "query": query,
                                "sources": [{"title": r["title"], "url": r["url"]} for r in results]}})
-        n_ctx = S.ENGINE_PROC.n_ctx or int(s["ctx_size"])
+        n_ctx = S.ENGINE_PROC.n_ctx or int(s["ctx_size"]) or 8192
         budget = max(2500, min(24000, int(n_ctx * 0.45 * 3.2)))  # ~3,2 caracteres por token
         texts = websearch.fetch_pages(results, budget // len(results))
         blocks = []
@@ -182,7 +183,9 @@ class ChatRoutes:
         sampling = {k: b[k] for k in ("temperature", "top_p", "top_k", "min_p", "repeat_penalty") if k in b}
         if int(b.get("max_tokens") or 0) > 0:
             sampling["max_tokens"] = int(b["max_tokens"])
-        history = S.build_history(b.get("messages", []), S.ENGINE_PROC.modalities, agent_mode=True)
+        history = S.build_history(b.get("messages", []), S.ENGINE_PROC.modalities, agent_mode=True,
+                                  budget=promptcache.budget(S.ENGINE_PROC.n_ctx))
+        s["_n_ctx"] = S.ENGINE_PROC.n_ctx
         image_fn = self.image_for_agent if (media.find_exe("sd", media.SD_EXE)
                                             and media.preset_installed(s.get("image_preset") or "z-image-turbo")) else None
         s["_reply_rule"] = S.reply_rule(s)
@@ -420,10 +423,12 @@ class ChatRoutes:
                     b["web"] = True
             messages = S.with_reply_rule(S.build_history(msgs, eng.modalities))
             kid = (ag or {}).get("kb") or b.get("kb")
+            original = messages
             if kid:
                 messages = self.kb_augment(messages, kid)
             if b.get("web"):
                 messages = self.web_augment(messages)
+            messages = promptcache.MEMORY.stabilize(original, messages, eng.n_ctx)
             payload = {"messages": messages, "stream": True, "cache_prompt": True, "timings_per_token": True}
             for k in ("temperature", "top_p", "top_k", "min_p", "repeat_penalty"):
                 if k in b:

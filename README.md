@@ -262,6 +262,11 @@ Em **Modelos → Meus modelos → ⚙️**, cada modelo pode ter contexto, camad
 - **Atalhos:** `Ctrl+1` a `Ctrl+4` trocam o modo, `Ctrl+N` nova conversa, `Ctrl+B` mostra/oculta as conversas.
 
 ## Travamentos e diagnóstico 🩺
+- **Encaixe na placa:** com *Camadas na GPU* em 999, o llama.cpp escolhe sozinho o que vai para a placa e o que fica na RAM. *Contexto* 0 usa o maior em que cada modelo cabe inteiro (conta pela arquitetura: 64 mil tokens ocupam ~7,8 GB no Llama 3.1 8B e menos de 2 GB no Gemma 4 12B). Se não couber na VRAM livre (um jogo aberto, por exemplo), a tela avisa.
+- **Cache do contexto em 8 bits** (opcional): quase metade da memória; pode perder um pouco de qualidade e ler o prompt mais devagar.
+- **⚡ Otimizar para este PC** (parâmetros do modelo): mede o modelo com o `llama-bench` e guarda o lote de leitura mais rápido.
+- **Menos releitura:** o histórico do Codex, os trechos da base, da web e da documentação ficam iguais entre um pedido e outro, e o motor reaproveita o cache.
+- **O motor fecha ao abrir?** Se for o Visual C++ antigo do Windows (menor que 14.40), a tela explica como atualizar.
 - **Contexto maior que a placa aguenta:** se o contexto das configurações não cabe na memória de vídeo (ou passa do máximo do modelo, lido do próprio arquivo GGUF), a Mikoshi reduz o contexto até caber, carrega o modelo e avisa quanto usou. As configurações não mudam: ajuste em Configurações → Modelo e runtime para não esperar as tentativas. Até a 1.29.0, com um contexto grande demais (ex.: 720000), o modelo dava erro ao ser carregado de novo depois de descarregado.
 
 - **Erro `CERTIFICATE_VERIFY_FAILED` ao baixar o motor ou um modelo:** o Windows completa a lista de certificados raiz aos poucos, e num PC novo o Python não conseguia conferir o GitHub. Agora a Mikoshi pede ao próprio Windows para atualizar a lista e tenta de novo (a verificação nunca é desligada). Se ainda falhar, por causa de um antivírus ou proxy que inspeciona o HTTPS, a mensagem diz o que fazer.
