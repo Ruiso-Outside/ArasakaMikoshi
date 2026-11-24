@@ -594,6 +594,25 @@ class ServerTest(unittest.TestCase):
         r = self.call("/api/summarize", {"messages": [{"role": "user", "content": "a"}, {"role": "assistant", "content": "b"}]})
         self.assertIn("Resumo", r["summary"])
         self.assertIn("chats", self.call("/api/backup/info"))
+        # o backup grava o nome novo; os feitos ate a 1.32.0 ("LLM Local") continuam sendo aceitos
+        import io
+        import zipfile
+        with urllib.request.urlopen(self.base + "/api/backup?attachments=0", timeout=30) as r:
+            manifest = json.loads(zipfile.ZipFile(io.BytesIO(r.read())).read("manifest.json"))
+        self.assertEqual(manifest["app"], "Arasaka Mikoshi")
+        for app, ok in (("LLM Local", True), ("Arasaka Mikoshi", True), ("Outro App", False)):
+            buf = io.BytesIO()
+            with zipfile.ZipFile(buf, "w") as z:
+                z.writestr("manifest.json", json.dumps({"app": app, "format": 1}))
+            req = urllib.request.Request(self.base + "/api/restore", data=buf.getvalue(), method="POST",
+                                         headers={"Content-Type": "application/zip", "Origin": self.base})
+            if ok:
+                with urllib.request.urlopen(req, timeout=30) as r:
+                    self.assertEqual(r.status, 200, app)
+            else:
+                with self.assertRaises(urllib.error.HTTPError, msg=app) as cm:
+                    urllib.request.urlopen(req, timeout=30)
+                self.assertEqual(cm.exception.code, 400)
 
 
 if __name__ == "__main__":

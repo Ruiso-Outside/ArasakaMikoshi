@@ -310,11 +310,11 @@ Em **Configurações → Idioma** escolha a língua do app: **Português (Brasil
 
 ## Testes
 
-`python -m unittest discover -s tests` roda os testes: unidade dos módulos, cliente MCP (com um servidor MCP falso), pixel art (`test_sprites.py`: PNG, fundo, paleta, folhas, escolha do pacote do motor no Linux, conexão com um Construct falso e o servidor MCP da Mikoshi) e integração (o servidor de verdade com um llama-server falso, um stable-diffusion.cpp falso e um Construct falso, sem GPU). No GitHub Actions eles rodam no Windows e no Linux a cada push e antes do instalador de cada Release (o workflow **Instalador Windows** só segue se os **Testes** passarem).
+`python -m unittest discover -s tests` roda os testes: unidade dos módulos, cliente MCP (com um servidor MCP falso), pixel art (`test_sprites.py`: PNG, fundo, paleta, folhas, escolha do pacote do motor no Linux, conexão com um Construct falso e o servidor MCP da Mikoshi) e integração (o servidor de verdade com um llama-server falso, um stable-diffusion.cpp falso e um Construct falso, sem GPU). `node --test desktop/test/*.test.js` testa o atualizador e `cd desktop && npx electron test/ui-smoke.js` usa a interface de verdade (com o servidor e o motor falsos). No GitHub Actions todos rodam no Windows e no Linux a cada push e antes de cada Release (o workflow **Release** só segue se os **Testes** passarem).
 
 ## Requisitos
 
-- Windows 10/11 com Python 3.9+ instalado e no PATH (sem bibliotecas extras); no Linux, como módulo da Arasaka Central, o `python3` do sistema
+- Windows 10/11 com Python 3.10+ instalado e no PATH (sem bibliotecas extras); no Linux, como módulo da Arasaka Central, o `python3` do sistema
 - Placa NVIDIA (CUDA), AMD/Intel (Vulkan), ou só CPU
 
 ## Estrutura do código
@@ -322,7 +322,9 @@ Em **Configurações → Idioma** escolha a língua do app: **Português (Brasil
 | Caminho | O que é |
 |---|---|
 | `desktop/` | App Electron: janelas, bandeja, atalho global, atualização e empacotamento (.zip portátil) |
-| `app/server.py` | Servidor interno (iniciado escondido pelo app): motor, modelos, chat e downloads |
+| `app/server.py` | Servidor interno (iniciado escondido pelo app): motor, modelos, configurações e downloads |
+| `app/routes.py` | Rotas da API: um método por rota e as tabelas `GET_ROUTES` e `POST_ROUTES` |
+| `app/chat_routes.py` / `app/media_routes.py` | Chat, Codex e agentes / arquivos, backup, imagens, Sprites e treino |
 | `app/websearch.py` | Pesquisa na web e leitura das páginas |
 | `app/agent.py` | Codex: ferramentas, limite de pasta e confirmações |
 | `app/catalog.py` | Etiquetas dos modelos (capacidades, tamanho, qualidade dos arquivos) |

@@ -18,21 +18,20 @@ jobs:
         os: [windows-latest, ubuntu-latest]
         python: ["3.14"]
         include:
-          # o app aceita o Python 3.9 ou mais novo (desktop/main.js e module/backend.js); confere que ainda roda nele
-          # (o ubuntu-latest e o 26.04, que nao tem builds do 3.9 no setup-python)
-          - os: ubuntu-24.04
-            python: "3.9"
+          # o app aceita o Python 3.10 ou mais novo (desktop/main.js e module/backend.js); confere que ainda roda nele
+          - os: ubuntu-latest
+            python: "3.10"
     name: tests (${{ matrix.os }}, Python ${{ matrix.python }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: ${{ matrix.python }}
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: "22"
 
@@ -62,3 +61,18 @@ jobs:
       - name: Testes do atualizador (Node)
         shell: bash
         run: node --test desktop/test/*.test.js
+
+      - name: Electron (para o teste da interface)
+        working-directory: desktop
+        shell: bash
+        run: |
+          npm ci --no-audit --no-fund
+          node node_modules/electron/install.js
+
+      - name: Teste da interface (Electron, servidor e motor falsos)
+        working-directory: desktop
+        shell: bash
+        env:
+          PYTHONIOENCODING: utf-8
+        run: |
+          if [ "$RUNNER_OS" = "Linux" ]; then xvfb-run -a npx electron test/ui-smoke.js; else npx electron test/ui-smoke.js; fi

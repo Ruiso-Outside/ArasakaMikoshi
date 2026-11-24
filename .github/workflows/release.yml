@@ -43,12 +43,12 @@ jobs:
       TAG: ${{ inputs.tag || (github.ref_type == 'tag' && github.ref_name) || '' }}
       PUBLISH: ${{ (github.event_name == 'push' && github.ref_type == 'tag') || inputs.publicar == true }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.tag || github.ref }}
           fetch-depth: 0
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
 
@@ -103,13 +103,13 @@ jobs:
           ls -la out
 
       - name: Attestation
-        uses: actions/attest-build-provenance@v2
+        uses: actions/attest-build-provenance@v4
         with:
           subject-path: out/*
 
       - name: Guardar os arquivos (sem publicar)
         if: env.PUBLISH != 'true'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: release-${{ steps.v.outputs.version }}
           path: out/

@@ -1259,6 +1259,8 @@ $("#resetStats").onclick = async () => {
   S.status.stats = await post("/api/stats/reset"); renderStatsSummary(); renderStatsBar();
 };
 async function initDesktopSettings() {
+  // aberta num navegador comum (sem a ponte do app desktop): as opções do app não se aplicam
+  if (!desktop) { $$(".desktop-only").forEach(el => el.hidden = true); return; }
   const cfg = await desktop.getConfig();
   $("#hotkeyInput").value = cfg.hotkey; $("#autoStart").checked = cfg.autoStart;
   $("#hideOnBlur").checked = cfg.quickHideOnBlur; $("#dataDir").textContent = cfg.homeDir;

@@ -126,7 +126,7 @@ function tryPython(cmd, args) {
     let out = "", done = false;
     const finish = ok => { if (!done) { done = true; clearTimeout(timer); resolve(ok); } };
     let p;
-    try { p = spawn(cmd, [...args, "-c", "import sys;print(sys.version_info>=(3,9))"], { windowsHide: true }); }
+    try { p = spawn(cmd, [...args, "-c", "import sys;print(sys.version_info>=(3,10))"], { windowsHide: true }); }
     catch { return resolve(false); }
     const timer = setTimeout(() => { try { p.kill(); } catch {} finish(false); }, 10000);
     p.stdout.on("data", d => out += d);
@@ -154,7 +154,7 @@ async function startServer() {
   if (!py) {
     const r = await dialog.showMessageBox({ type: "error", title: "Arasaka Mikoshi",
       message: "Python não encontrado",
-      detail: "O Arasaka Mikoshi precisa do Python 3.9 ou mais novo.\nInstale em python.org marcando a opção \"Add python.exe to PATH\" e abra o app de novo.",
+      detail: "O Arasaka Mikoshi precisa do Python 3.10 ou mais novo.\nInstale em python.org marcando a opção \"Add python.exe to PATH\" e abra o app de novo.",
       buttons: ["Abrir python.org", "Fechar"] });
     if (r.response === 0) shell.openExternal("https://www.python.org/downloads/");
     return false;

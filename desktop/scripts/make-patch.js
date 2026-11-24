@@ -1,9 +1,8 @@
 // Gera o pacote de atualização a partir de dist/win-unpacked:
 //   dist/app-patch-X.Y.Z.zip  -> pastas resources/app e resources/server
 //   dist/patch.json           -> versão, versão do Electron, tamanho e SHA-512
-//   node scripts/make-patch.js            (só gera)
-//   node scripts/make-patch.js --upload   (gera e envia para o Release vX.Y.Z; precisa de GH_TOKEN)
-//   Com --upload também envia dist/piphin-module-llm-X.Y.Z.zip (módulo do Piphin Hub), se existir.
+//   node scripts/make-patch.js
+// Quem envia ao Release é o GitHub Actions (.github/workflows/release.yml).
 const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
@@ -12,7 +11,6 @@ const pkg = require("../package.json");
 
 const { version } = pkg;
 const electron = pkg.devDependencies.electron;
-const { owner, repo } = pkg.build.publish[0];
 const dist = path.join(__dirname, "..", "dist");
 const res = path.join(dist, "win-unpacked", "resources");
 const file = `app-patch-${version}.zip`;
@@ -33,51 +31,3 @@ const manifest = { version, electron, file, size: data.length,
   sha512: crypto.createHash("sha512").update(data).digest("base64"), date: new Date().toISOString() };
 fs.writeFileSync(path.join(dist, "patch.json"), JSON.stringify(manifest, null, 2));
 console.log(`✓ ${file} (${(data.length / 1e6).toFixed(1)} MB) e patch.json gerados`);
-
-// Envia um arquivo ao Release. O fetch do Node as vezes cai no meio do envio ("terminated"; aconteceu na 1.31.1
-// com o Node 26), e o Release ficava sem o modulo: o Arasaka Central dizia que a versao "nao tem o arquivo esperado".
-// Tenta 3 vezes com o fetch e depois com o curl (vem com o Windows 10+ e o Git).
-async function sendAsset(h, rel, name) {
-  const url = `https://uploads.github.com/repos/${owner}/${repo}/releases/${rel.id}/assets?name=${encodeURIComponent(name)}`;
-  const type = name.endsWith(".json") ? "application/json" : "application/zip";
-  const file = path.join(dist, name);
-  const clearOld = async () => { // um envio que caiu pode deixar um asset "starter" com o mesmo nome
-    const assets = await (await fetch(`https://api.github.com/repos/${owner}/${repo}/releases/${rel.id}/assets?per_page=100`, { headers: h })).json();
-    for (const a of assets.filter(a => a.name === name))
-      await fetch(`https://api.github.com/repos/${owner}/${repo}/releases/assets/${a.id}`, { method: "DELETE", headers: h });
-  };
-  let last = "";
-  for (let i = 1; i <= 3; i++) {
-    try {
-      await clearOld();
-      const r = await fetch(url, { method: "POST", headers: { ...h, "Content-Type": type }, body: fs.readFileSync(file) });
-      if (r.ok) return;
-      last = `HTTP ${r.status}: ${await r.text()}`;
-      if (r.status < 500) break; // erro de permissao ou de nome: tentar de novo nao adianta
-    } catch (e) {
-      last = e.message;
-    }
-    console.log(`  … ${name}: ${last}; tentando de novo (${i}/3)`);
-    await new Promise(r => setTimeout(r, 3000 * i));
-  }
-  await clearOld();
-  const c = spawnSync("curl", ["-sS", "--fail-with-body", "--retry", "3", "-X", "POST", "-H", `Authorization: Bearer ${h.Authorization.slice(7)}`,
-    "-H", `Content-Type: ${type}`, "--data-binary", `@${file}`, url], { encoding: "utf8" });
-  if (c.status !== 0) fail(`falha ao enviar ${name} (${last}; curl: ${(c.stderr || c.stdout || c.error?.message || "").trim()})`);
-}
-
-async function upload() {
-  const token = process.env.GH_TOKEN;
-  if (!token) fail("defina GH_TOKEN para enviar ao GitHub.");
-  const h = { Authorization: `Bearer ${token}`, "User-Agent": "llm-local-release", Accept: "application/vnd.github+json" };
-  const rels = await (await fetch(`https://api.github.com/repos/${owner}/${repo}/releases?per_page=100`, { headers: h })).json();
-  const rel = rels.find(r => r.tag_name === `v${version}`);
-  if (!rel) fail(`Release v${version} não encontrado.`);
-  const moduleZip = `piphin-module-llm-${version}.zip`;
-  for (const name of [file, "patch.json", ...(fs.existsSync(path.join(dist, moduleZip)) ? [moduleZip] : [])]) {
-    await sendAsset(h, rel, name);
-    console.log(`✓ enviado ${name}`);
-  }
-}
-
-if (process.argv.includes("--upload")) upload().catch(e => fail(e.message));

@@ -38,7 +38,7 @@ exports.activate = (ctx) => {
     return new Promise((resolve) => {
       let out = "", done = false, p;
       const finish = (ok) => { if (!done) { done = true; clearTimeout(timer); resolve(ok); } };
-      try { p = spawn(cmd, [...args, "-c", "import sys;print(sys.version_info>=(3,9))"], { windowsHide: true }); } catch { return resolve(false); }
+      try { p = spawn(cmd, [...args, "-c", "import sys;print(sys.version_info>=(3,10))"], { windowsHide: true }); } catch { return resolve(false); }
       const timer = setTimeout(() => { try { p.kill(); } catch { /* já saiu */ } finish(false); }, 10000);
       p.stdout.on("data", (d) => (out += d));
       p.on("error", () => finish(false));
@@ -87,8 +87,8 @@ exports.activate = (ctx) => {
     if (!py) {
       serverError = "python";
       const r = await ctx.host.messageBox({ type: "error", message: "Python não encontrado",
-        detail: IS_WIN ? "O Arasaka Mikoshi precisa do Python 3.9 ou mais novo.\nInstale em python.org marcando a opção \"Add python.exe to PATH\" e abra o módulo de novo."
-          : "O Arasaka Mikoshi precisa do Python 3.9 ou mais novo.\nNo terminal: sudo apt install python3  e abra o módulo de novo.",
+        detail: IS_WIN ? "O Arasaka Mikoshi precisa do Python 3.10 ou mais novo.\nInstale em python.org marcando a opção \"Add python.exe to PATH\" e abra o módulo de novo."
+          : "O Arasaka Mikoshi precisa do Python 3.10 ou mais novo.\nNo terminal: sudo apt install python3  e abra o módulo de novo.",
         buttons: IS_WIN ? ["Abrir python.org", "Fechar"] : ["Fechar"] });
       if (IS_WIN && r === 0) ctx.emit("open-url", "https://www.python.org/downloads/");
       return false;

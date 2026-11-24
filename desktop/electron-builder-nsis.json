@@ -27,5 +27,5 @@
     "installerIcon": "icon.ico",
     "uninstallerIcon": "icon.ico"
   },
-  "publish": [{ "provider": "github", "owner": "Ruiso-Outside", "repo": "ArasakaMikoshi", "releaseType": "release" }]
+  "publish": [{ "provider": "github", "owner": "Ruiso-Outside", "repo": "ArasakaMikoshi" }]
 }

@@ -210,7 +210,7 @@ def tool_read_file(ws, path, start_line=None, end_line=None):
 
 def _write_exact(p, text):
     """Grava sem converter as quebras de linha. Path.write_text(newline=...) so existe no Python 3.10+;
-    o app aceita o 3.9, e nele o Codex nao conseguia criar nem editar arquivos."""
+    o Codex quebrava no 3.9 (o app aceitava o 3.9 ate a 1.32.0)."""
     with open(p, "w", encoding="utf-8", newline="") as f:
         f.write(text)
 
