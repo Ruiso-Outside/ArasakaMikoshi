@@ -17,6 +17,7 @@ from datetime import datetime
 from pathlib import Path
 
 import mcp
+import ctxfit
 import mcpdocs
 import promptcache
 import rea
@@ -191,7 +192,7 @@ def tool_list_files(ws, path=".", max_depth=3):
     return "\n".join(lines) + ("\n... (lista cortada em 500 itens)" if count >= 500 else "")
 
 
-def tool_read_file(ws, path, start_line=None, end_line=None):
+def tool_read_file(ws, path, start_line=None, end_line=None, limit=MAX_READ_CHARS):
     p = ws.path(path)
     if not p.is_file():
         raise ToolError("Arquivo nao encontrado.")
@@ -202,7 +203,7 @@ def tool_read_file(ws, path, start_line=None, end_line=None):
     for i in range(a, b + 1):
         row = f"{i:>5}| {lines[i - 1]}"
         size += len(row)
-        if size > MAX_READ_CHARS:
+        if size > limit:
             out.append(f"... (cortado; o arquivo tem {len(lines)} linhas. Leia a partir da linha {i})")
             break
         out.append(row)
@@ -554,7 +555,9 @@ class AgentRun:
         if name == "list_files":
             return tool_list_files(ws, args.get("path", "."), args.get("max_depth", 3))
         if name == "read_file":
-            return tool_read_file(ws, args["path"], args.get("start_line"), args.get("end_line"))
+            fit = getattr(self, "fit", None)
+            return tool_read_file(ws, args["path"], args.get("start_line"), args.get("end_line"),
+                                  min(MAX_READ_CHARS, fit.result_limit() - 200) if fit else MAX_READ_CHARS)
         if name == "write_file":
             return tool_write_file(ws, args["path"], args.get("content", ""))
         if name == "edit_file":
@@ -624,12 +627,19 @@ class AgentRun:
         turn = promptcache.prepend(history, docs.strip() + "\n\nPedido do usuario:\n") if docs else history
         messages = [{"role": "system", "content": sp}] + promptcache.MEMORY.stabilize(history, turn, self.s.get("_n_ctx"))
         trace, last_timings = [], None
+        self.fit = ctxfit.Fit(self.s.get("_n_ctx"), tools)
+        told = []
+
+        def on_shrink():
+            if not told:
+                told.append(1)
+                self.send({"agent": {"type": "notice", "text": "✂ Resultados antigos encurtados para a tarefa caber no contexto"}})
         max_steps = max(1, min(int(self.s.get("agent_max_steps") or 40), 200))
         for step in range(max_steps):
             payload = {"messages": messages, "tools": tools, "tool_choice": "auto", "stream": True,
                        "cache_prompt": True, "timings_per_token": True, "parallel_tool_calls": True, **sampling}
             content, calls = "", {}
-            with self.engine_call(payload) as up:
+            with self.fit.call(self.engine_call, payload, on_shrink) as up:
                 for raw in iter(up.readline, b""):
                     line = raw.decode("utf-8", "replace").strip()
                     if not line.startswith("data:") or line == "data: [DONE]":
@@ -656,6 +666,7 @@ class AgentRun:
                         c["arguments"] += fn.get("arguments") or ""
                     if not self.alive:
                         return trace, last_timings
+            self.fit.learn(self.fit.sent, last_timings)
             tool_calls = []
             for i in sorted(calls):
                 c = calls[i]
@@ -701,6 +712,7 @@ class AgentRun:
                             result, ok = f"Erro: {type(e).__name__}: {e}", False
                 if not self.alive:
                     return trace, last_timings
+                result = self.fit.cap(result)
                 tmsg = {"role": "tool", "tool_call_id": tc["id"], "content": result}
                 messages.append(tmsg)
                 trace.append(tmsg)

@@ -266,6 +266,8 @@ Em **Modelos → Meus modelos → ⚙️**, cada modelo pode ter contexto, camad
 - **Cache do contexto em 8 bits** (opcional): quase metade da memória; pode perder um pouco de qualidade e ler o prompt mais devagar.
 - **⚡ Otimizar para este PC** (parâmetros do modelo): mede o modelo com o `llama-bench` e guarda o lote de leitura mais rápido.
 - **Menos releitura:** o histórico do Codex, os trechos da base, da web e da documentação ficam iguais entre um pedido e outro, e o motor reaproveita o cache.
+- **Tarefas longas no Codex e nos agentes:** os resultados antigos são encurtados só quando a tarefa não cabe no contexto (a conversa salva não muda).
+- **Grupos de agentes:** a conversa e o trabalho anterior vêm primeiro e a função de cada agente no fim, para o motor reaproveitar o cache entre eles.
 - **O motor fecha ao abrir?** Se for o Visual C++ antigo do Windows (menor que 14.40), a tela explica como atualizar.
 - **Contexto maior que a placa aguenta:** se o contexto das configurações não cabe na memória de vídeo (ou passa do máximo do modelo, lido do próprio arquivo GGUF), a Mikoshi reduz o contexto até caber, carrega o modelo e avisa quanto usou. As configurações não mudam: ajuste em Configurações → Modelo e runtime para não esperar as tentativas. Até a 1.29.0, com um contexto grande demais (ex.: 720000), o modelo dava erro ao ser carregado de novo depois de descarregado.
 

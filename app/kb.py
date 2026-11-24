@@ -285,11 +285,8 @@ def search(kid, query, embed_fn, k=6, min_score=0.15, relative=0.6):
     if not chunks:
         return []
     q = _normalize(embed_fn([QUERY_PREFIX + query])[0])
-    scores = []
-    mul = operator.mul
-    for i in range(len(chunks)):
-        off = i * DIM
-        scores.append((sum(map(mul, q, vecs[off:off + DIM])), i))
+    dot = getattr(math, "sumprod", None) or (lambda a, b: sum(map(operator.mul, a, b)))  # sumprod: Python 3.12+
+    scores = [(dot(q, vecs[i * DIM:(i + 1) * DIM]), i) for i in range(len(chunks))]
     scores.sort(reverse=True)
     # corte: nota minima absoluta e relativa ao melhor trecho (descarta o claramente irrelevante)
     cut = max(min_score, scores[0][0] * relative) if scores else min_score

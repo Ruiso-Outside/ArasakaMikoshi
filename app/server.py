@@ -71,6 +71,8 @@ ENGINE_KEY = secrets.token_urlsafe(24)
 ENGINE_HEADERS = {"Content-Type": "application/json", "Authorization": f"Bearer {ENGINE_KEY}"}
 UA = "LLM-Local/1.0"
 BACKENDS = ("cuda", "vulkan", "cpu")
+EMBED_CTX = 8192  # contexto do motor de embeddings (bases de conhecimento)
+EXTRA_CTX = 16384  # contexto automatico dos modelos extras e dos que nao cabem na placa
 BENCH_FILE = DATA / "bench.json"  # medidas do Otimizar, por modelo
 
 for d in (MODELS, ENGINE, CHATS):
@@ -728,19 +730,6 @@ class EngineProcess:
         s = dict(s)
         self._kv = kv
         kv_type = kv or (s.get("kv_cache") if s.get("kv_cache") in modelsettings.KV_TYPES else "f16")
-        if ctx is None:
-            self.notice = ""
-            if int(s["ctx_size"]) <= 0:  # automatico: o maior que cabe inteiro na placa
-                s["ctx_size"] = auto_context(model_rel, kv_type)
-            self.ctx_requested = int(s["ctx_size"])
-            # mais contexto que o de treino nao serve para nada e so gasta VRAM (ex.: 720000 num modelo de 262144)
-            train = gguf_context_length(model_path) if model_path.is_file() else 0
-            if train and int(s["ctx_size"]) > train:
-                s["ctx_size"] = train
-                self.notice = (f"Contexto reduzido de {self.ctx_requested} para {train} tokens: é o máximo deste modelo. "
-                               "Ajuste em Configurações → Modelo e runtime.")
-        else:
-            s["ctx_size"] = ctx
         if MODELS.resolve() not in model_path.parents or not model_path.is_file():
             raise ValueError("Modelo nao encontrado.")
         backs = installed_backends()
@@ -755,6 +744,23 @@ class EngineProcess:
         on_cpu = device == "cpu"
         if self is ENGINE_PROC and not on_cpu:
             POOL.make_room_for_main(model_rel)  # o principal tem prioridade na VRAM
+        if ctx is not None:
+            s["ctx_size"] = ctx
+        elif embed:
+            # os trechos da base tem ~1200 caracteres: o contexto das configuracoes (ex.: 64000) so gastava VRAM (4 GB ou mais)
+            self.notice, self.ctx_requested = "", EMBED_CTX
+            s["ctx_size"] = min(EMBED_CTX, gguf_context_length(model_path) or EMBED_CTX)
+        else:
+            self.notice = ""
+            if int(s["ctx_size"]) <= 0:  # automatico: o maior que cabe inteiro na VRAM livre agora
+                s["ctx_size"] = auto_context(model_rel, kv_type, self, on_cpu or backend == "cpu")
+            self.ctx_requested = int(s["ctx_size"])
+            # mais contexto que o de treino nao serve para nada e so gasta VRAM (ex.: 720000 num modelo de 262144)
+            train = gguf_context_length(model_path)
+            if train and int(s["ctx_size"]) > train:
+                s["ctx_size"] = train
+                self.notice = (f"Contexto reduzido de {self.ctx_requested} para {train} tokens: é o máximo deste modelo. "
+                               "Ajuste em Configurações → Modelo e runtime.")
         ngl = "0" if on_cpu else str(int(s["gpu_layers"]))
         if not on_cpu and int(s["gpu_layers"]) >= 999:
             ngl = "auto"  # tudo que couber na VRAM livre de verdade; o resto fica na RAM (um numero fixo desliga esse encaixe)
@@ -1206,38 +1212,56 @@ def model_recommended(rel):
                                             model_bytes(rel), GPU.get("vram_mb", 0) * 2 ** 20)
     fit = fit_context(rel)
     if fit is not None:  # conta de verdade, pela arquitetura do modelo
-        rec["ctx_size"] = fit or gguf.CTX_STEPS[0]
+        rec["ctx_size"] = min(gguf_context_length(MODELS / rel) or EXTRA_CTX, max(fit, EXTRA_CTX))
     return rec, family
 
 
-def extra_bytes(rel):
-    """O que carrega junto do modelo na placa: projetor de visao e acelerador (MTP ou rascunho)."""
-    _, accel = accel_for(rel)
-    return gguf.size_of(mmproj_for(rel)) + gguf.size_of(accel)
-
-
 def fit_context(rel, kv_type="", free=None):
-    """Maior contexto em que o modelo cabe inteiro na placa (0 = nao cabe; None = nao da para estimar)."""
+    """Maior contexto em que o modelo cabe inteiro na placa (0 = nao cabe; None = nao da para estimar).
+    model_bytes ja inclui o projetor de visao e o acelerador."""
     if not rel or strata.parse_id(rel) or not GPU.get("vram_mb"):
         return None
     if not kv_type:
         kv_type = modelsettings.get(rel).get("kv_cache") or load_settings().get("kv_cache") or "f16"
-    return gguf.best_context(gguf.read_meta(MODELS / rel), model_bytes(rel), extra_bytes(rel), GPU["vram_mb"] * 2 ** 20, kv_type, free)
+    return gguf.best_context(gguf.read_meta(MODELS / rel), model_bytes(rel), 0, GPU["vram_mb"] * 2 ** 20, kv_type, free)
 
 
-def auto_context(rel, kv_type):
-    """Contexto automatico (ctx_size 0). Um modelo maior que a placa fica com 16 mil: parte dele roda na RAM de qualquer jeito."""
-    fit = fit_context(rel, kv_type)
+def free_vram(engine=None):
+    """VRAM livre (bytes) para `engine`: medida na placa ou, sem a medida, o total menos os outros modelos carregados."""
+    others = [e for e in [ENGINE_PROC, *list(POOL.extra.values())] if e is not engine and e.device == "gpu"]
+    size = lambda e: model_bytes(e.model) + POOL.OVERHEAD
+    sample = gpu_sample()
+    if not sample:
+        return GPU.get("vram_mb", 0) * 2 ** 20 - gguf.DESKTOP - sum(size(e) for e in others if e.state in ("ready", "loading"))
+    for _ in range(4):  # o driver leva um instante para devolver a memoria do modelo que acabou de sair
+        time.sleep(0.3)
+        again = gpu_sample() or sample
+        if again[0] >= sample[0] - 64:
+            break
+        sample = again
+    # um modelo ainda carregando vai ocupar mais do que a medida mostra
+    return (sample[1] - sample[0]) * 2 ** 20 - sum(size(e) for e in others if e.state == "loading")
+
+
+def auto_context(rel, kv_type, engine=None, on_cpu=False):
+    """Contexto automatico (ctx_size 0): o maior em que o modelo cabe inteiro na VRAM livre agora. Os modelos extras
+    (agentes, pergunta rapida) ficam em ate 16 mil para nao tomar a placa do principal; um modelo que nao cabe tambem:
+    parte dele roda na RAM de qualquer jeito."""
     train = gguf_context_length(MODELS / rel) or gguf.CTX_STEPS[-1]
+    fit = None if on_cpu else fit_context(rel, kv_type, free_vram(engine) if engine else None)
     if fit is None:
-        return min(train, 8192)
-    return min(train, fit or 16384)
+        return min(train, 16384 if on_cpu and gguf_context_length(MODELS / rel) else 8192)
+    if engine is not None and engine is not ENGINE_PROC:
+        return min(train, fit or 8192, EXTRA_CTX)
+    # nunca menos de 16 mil no principal: a conta tem folga, e no limite so um pedaco pequeno vai para a RAM
+    return min(train, max(fit, EXTRA_CTX))
 
 
 def vram_notice(rel, ctx, kv_type):
     """Aviso quando o modelo nao vai caber inteiro na VRAM livre agora (contexto grande ou um jogo aberto)."""
     sample = gpu_sample()
-    need = gguf.needed(gguf.read_meta(MODELS / rel), model_bytes(rel), extra_bytes(rel), ctx, kv_type)
+    meta = gguf.read_meta(MODELS / rel)
+    need = gguf.needed(meta, model_bytes(rel), 0, ctx, kv_type)
     if not sample or not need:
         return ""
     free = (sample[1] - sample[0]) * 2 ** 20
@@ -1246,7 +1270,8 @@ def vram_notice(rel, ctx, kv_type):
     fit = fit_context(rel, kv_type, free)
     tip = (f" Com contexto de até {fit} tokens ele caberia inteiro." if fit and fit < ctx else
            " Feche programas que usam a placa (jogos) ou use um modelo menor.")
-    return (f"Parte do modelo vai para a RAM (mais lento): com {ctx} tokens de contexto ele precisa de cerca de "
+    moe = bool(meta.get(f"{meta.get('general.architecture', '')}.expert_count"))  # so os especialistas pouco usados saem da placa
+    return (f"Parte do modelo pode ficar na RAM ({'neste tipo de modelo (MoE) perde pouca velocidade' if moe else 'mais lento'}): com {ctx} tokens de contexto ele precisa de cerca de "
             f"{need / gguf.GIB:.1f} GB e a placa tem {free / gguf.GIB:.1f} GB livres.{tip}")
 
 
@@ -1629,14 +1654,30 @@ def download_model(task, repo, path, with_mmproj=False, with_mtp=False):
 ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 
 
+_chats_cache = {}  # arquivo -> ((data, tamanho), resumo): a tela pede a lista a cada 1,5 s
+
+
 def list_chats():
-    out = []
-    for f in CHATS.glob("*.json"):
+    out, seen = [], set()
+    try:
+        entries = [e for e in os.scandir(CHATS) if e.name.endswith(".json")]
+    except OSError:
+        return []
+    for e in entries:
         try:
-            c = json.loads(f.read_text("utf-8"))
-            out.append({"id": c["id"], "title": c.get("title", ""), "updated": c.get("updated", 0)})
-        except (OSError, ValueError, KeyError):
+            st = e.stat()
+            sig = (st.st_mtime_ns, st.st_size)
+            hit = _chats_cache.get(e.name)
+            if not hit or hit[0] != sig:
+                c = json.loads(Path(e.path).read_text("utf-8"))
+                hit = (sig, {"id": c["id"], "title": c.get("title", ""), "updated": c.get("updated", 0)})
+                _chats_cache[e.name] = hit
+            seen.add(e.name)
+            out.append(dict(hit[1]))
+        except (OSError, ValueError, KeyError, TypeError):
             pass
+    for name in [n for n in list(_chats_cache) if n not in seen]:
+        _chats_cache.pop(name, None)
     return sorted(out, key=lambda c: c["updated"], reverse=True)
 
 

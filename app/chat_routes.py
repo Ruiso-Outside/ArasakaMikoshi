@@ -13,6 +13,7 @@ from datetime import datetime
 from pathlib import Path
 import agent
 import agents
+import ctxfit
 import kb
 import mcp
 import media
@@ -339,13 +340,14 @@ class ChatRoutes:
             msgs.insert(0, {"role": "system", "content": note})
         return tools, mapping
 
-    def chat_with_tools(self, payload, tools, mapping, max_steps=8):
+    def chat_with_tools(self, payload, tools, mapping, max_steps=8, n_ctx=0):
         """Chat em que o modelo pode chamar as ferramentas da Central; o texto vai para a tela como no chat normal."""
         payload = {**payload, "tools": tools, "tool_choice": "auto", "parallel_tool_calls": True}
         messages, last = payload["messages"], None
+        fit = ctxfit.Fit(n_ctx, tools)
         for _ in range(max_steps):
             content, calls = "", {}
-            with self.engine_call(payload, True) as up:
+            with fit.call(lambda p: self.engine_call(p, True), payload) as up:
                 for raw in iter(up.readline, b""):
                     line = raw.decode("utf-8", "replace").strip()
                     if not line.startswith("data:") or line == "data: [DONE]":
@@ -392,7 +394,7 @@ class ChatRoutes:
                     except mcp.MCPError as e:
                         text, ok = f"Erro: {e}", False
                 self.sse({"tool": {"stage": "done", "id": cid, "title": title, "ok": ok, "result": text[:600]}})
-                messages.append({"role": "tool", "tool_call_id": cid, "content": text})
+                messages.append({"role": "tool", "tool_call_id": cid, "content": fit.cap(text)})
         return last
 
     def proxy_chat(self, b):
@@ -439,7 +441,7 @@ class ChatRoutes:
             last_timings = None
             hub = self.hub_tools(payload) if b.get("hub") and not ag else None
             if hub:
-                last_timings = self.chat_with_tools(payload, *hub)
+                last_timings = self.chat_with_tools(payload, *hub, n_ctx=eng.n_ctx)
             else:
                 upstream = self.engine_call(payload, True)
                 for line in iter(upstream.readline, b""):

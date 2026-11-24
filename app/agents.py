@@ -11,6 +11,7 @@ import time
 import uuid
 from pathlib import Path
 
+import ctxfit
 import mcp
 from agent import AgentRun, wait_approval, _preview_args
 
@@ -138,11 +139,18 @@ def run_group(h, group_id, task_msg, history, sampling):
 
 def _run_step(h, emit, group, agents, steps, i, ag, is_val, eng, task_msg, history, outputs, feedback, retries, sampling):
     """Executa uma etapa no motor `eng`. Devolve (texto, timings); texto None se o cliente desconectou."""
-    system = (ag["instructions"] or "Você é um assistente útil.") + \
+    goal = f" Objetivo do grupo: {group['description']}" if group["description"] else ""
+    rule = (("\n\n" + h.reply_rule()) if h.reply_rule() else "")
+    role = (ag["instructions"] or "Você é um assistente útil.") + \
         f"\n\nVocê é o agente \"{ag['name']}\" do grupo \"{group['name']}\"." + \
-        (f" Objetivo do grupo: {group['description']}" if group["description"] else "") + \
+        ("" if len(steps) > 1 else goal) + \
         " Faça somente a sua função, sem repetir o trabalho dos outros agentes. Responda no idioma do usuário." + \
-        (VALIDATOR_SUFFIX if is_val else "") + (("\n\n" + h.reply_rule()) if h.reply_rule() else "")
+        (VALIDATOR_SUFFIX if is_val else "")
+    # num grupo, o comeco (conversa, pedido e trabalho anterior) e igual para todos e o papel vem no fim: o motor reaproveita
+    # o cache de um agente para o outro em vez de reler a conversa inteira. Um agente sozinho fica como sempre.
+    system = role + rule if len(steps) == 1 else \
+        f"Você participa do grupo de agentes \"{group['name']}\".{goal} A sua função nesta etapa vem no fim da mensagem, em \"SUA FUNÇÃO\": " \
+        "siga-a como instrução principal." + rule
     task_text, task_parts = h.split_content(task_msg, eng.modalities)
     user = f"Pedido do usuário:\n{task_text}"
     prev = [(steps[j], outputs[j]) for j in range(i) if j in outputs]
@@ -153,6 +161,8 @@ def _run_step(h, emit, group, agents, steps, i, ag, is_val, eng, task_msg, histo
         old, fb = feedback.pop(i)
         user += (f"\n\nSua resposta anterior foi REPROVADA pelo validador.\n\nSua resposta anterior:\n{old}"
                  f"\n\nFeedback do validador:\n{fb}\n\nRefaça a sua parte corrigindo os problemas apontados.")
+    if len(steps) > 1:
+        user += f"\n\n---\nSUA FUNÇÃO (responda cumprindo exatamente isto):\n{role}"
     content = task_parts + [{"type": "text", "text": user}] if task_parts else user
     messages = [{"role": "system", "content": system}] + history + [{"role": "user", "content": content}]
     model_name = Path(eng.model).stem if eng.model else ""
@@ -167,7 +177,7 @@ def _run_step(h, emit, group, agents, steps, i, ag, is_val, eng, task_msg, histo
     payload = {"messages": messages, "stream": True, "cache_prompt": True, "timings_per_token": True, **sampling}
     h.apply_model_sampling(payload, eng.model, ag["temperature"])
     if ag.get("mcp"):
-        return _tool_loop(h, emit, payload, ag)
+        return _tool_loop(h, emit, payload, ag, eng.n_ctx)
     text, timings = "", None
     with h.engine_call(payload, True) as up:
         for raw in iter(up.readline, b""):
@@ -191,7 +201,7 @@ def _run_step(h, emit, group, agents, steps, i, ag, is_val, eng, task_msg, histo
     return THINK_RE.sub("", text).strip(), timings
 
 
-def _tool_loop(h, emit, payload, ag):
+def _tool_loop(h, emit, payload, ag, n_ctx=0):
     """Etapa de um agente com ferramentas MCP: o modelo chama ferramentas ate dar a resposta final."""
     ping = lambda: emit(None)
     tools, mapping = mcp.MANAGER.toolset(ag["mcp"], ping, lambda name, err: emit({"group": {"type": "notice", "level": "error", "text": f"⚠ {err}"}}))
@@ -203,9 +213,10 @@ def _tool_loop(h, emit, payload, ag):
                                               ". Use-as quando o pedido exigir; consulte antes de alterar e confira o resultado.")
         payload.update({"tools": tools, "tool_choice": "auto"})
     messages, auto, text, timings = payload["messages"], set(), "", None
+    fit = ctxfit.Fit(n_ctx, tools)
     for _ in range(30):
         content, calls = "", {}
-        with h.engine_call(payload, True) as up:
+        with fit.call(lambda p: h.engine_call(p, True), payload) as up:
             for raw in iter(up.readline, b""):
                 line = raw.decode("utf-8", "replace").strip()
                 if not line.startswith("data:") or line == "data: [DONE]":
@@ -230,6 +241,7 @@ def _tool_loop(h, emit, payload, ag):
                     fn = tc.get("function") or {}
                     cl["name"] += fn.get("name") or ""
                     cl["arguments"] += fn.get("arguments") or ""
+        fit.learn(fit.sent, timings)
         text += content
         if not calls:
             break
@@ -269,6 +281,7 @@ def _tool_loop(h, emit, payload, ag):
                         image, ok = (images[0] if images else None), not result.startswith("Erro da ferramenta")
                     except mcp.MCPError as e:
                         result = f"Erro: {e}"
+            result = fit.cap(result)
             messages.append({"role": "tool", "tool_call_id": tc["id"], "content": result})
             if not emit({"group": {"type": "tool_end", "id": tc["id"], "ok": ok, "result": result[:6000], "image": image}}):
                 return None, timings
