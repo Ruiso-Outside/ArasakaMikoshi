@@ -2,7 +2,7 @@
 //   dist/app-patch-X.Y.Z.zip  -> pastas resources/app e resources/server
 //   dist/patch.json           -> versão, versão do Electron, tamanho e SHA-512
 //   node scripts/make-patch.js
-// Quem envia ao Release é o GitHub Actions (.github/workflows/release.yml).
+// Quem envia ao Release é o scripts/release.js.
 const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");

@@ -34,24 +34,19 @@ A atualização **não executa nenhum instalador**: ela troca só as pastas `res
 > **Assinatura digital:** para o Windows mostrar "Editor: Piphin Studio" e aceitar também o instalador, é preciso um certificado de assinatura de código (OV, a partir de ~US$ 216/ano; em nome da empresa exige CNPJ). O Azure Artifact Signing não está disponível para o Brasil.
 
 ### Publicar uma versão nova (para todos os PCs atualizarem)
-Tudo é montado e publicado pelo **GitHub Actions** (workflow *Release*, `.github/workflows/release.yml`) a partir da tag `vX.Y.Z`: o `.zip` portátil, o pacote de atualização (`app-patch-X.zip` + `patch.json`), o módulo da Arasaka Central e o instalador `LLM-Local-Setup-X.exe` + `latest.yml` (usados pelas versões antigas, até a 1.3.0). Antes, os testes rodam no Windows e no Linux. Não precisa de token nem de build no PC.
-
-**Pela Arasaka Central (mais fácil):** com o repositório clonado na pasta dos repositórios do Desenvolvedor (padrão `~/piphin`), abra **Desenvolvedor → Arasaka Mikoshi → Publicar**, digite a versão e as notas. A Central troca a versão em `desktop/package.json`, faz o commit, envia e cria a tag com as notas; o GitHub faz o resto.
-
-**À mão:**
-1. Aumente `"version"` em `desktop/package.json` (ex.: `1.2.0` → `1.3.0`), faça o commit e o push no `main`.
-2. Rode:
+Tudo é montado e enviado do PC; nada roda sozinho no GitHub (os workflows são só para rodar à mão).
+1. Aumente `"version"` em `desktop/package.json`, rode `npm install --package-lock-only` e faça o commit no `main`.
+2. Monte e publique (usa o login do GitHub salvo no git, ou `GH_TOKEN`):
 ```
 cd desktop
-npm run release
+npm ci
+node node_modules/electron/install.js
+npm run dist
+npm run release -- notas.md
 ```
-Ele cria e envia a tag e espera o Release ser publicado (uns 15 min), conferindo se todos os arquivos baixam. `npm run verify-release` só confere.
+O `release` confere o repositório e os pacotes, envia o `main` e a tag e cria o Release como **rascunho**; ele só é publicado com todos os arquivos enviados e conferidos (tamanho e SHA-256), para nem os apps nem a Central verem uma versão pela metade. Se algo falhar, rode de novo: ele continua do rascunho. `npm run verify-release` só confere.
 
-O Release nasce como **rascunho** e só é publicado quando todos os arquivos estão lá: nem os apps nem a Central enxergam uma versão pela metade (até a 1.31.1, um envio que falhava no PC deixava a versão visível sem o módulo, e a Central dizia "A versão não tem o arquivo esperado"). Se o workflow falhar, corrija e rode de novo pelo GitHub (Actions → Release → *Run workflow*, com a tag e *Publicar* marcado): ele refaz o rascunho.
-
-Todos os arquivos vêm com **attestation** (prova de que saíram do workflow, sem modificações). Para conferir: `gh attestation verify piphin-module-llm-X.zip --repo Ruiso-Outside/ArasakaMikoshi`.
-
-Um push num branch `ci/...` roda o mesmo workflow **sem publicar** e guarda os arquivos montados (aba Actions → *Artifacts*), para testar o build.
+`npm run installer` (opcional) gera o instalador das versões até a 1.3.0; se existir em `dist-nsis`, entra no Release. O Controle Inteligente de Aplicativos pode bloquear esse build.
 
 ### Gerar a versão portátil de novo, sem publicar
 ```
@@ -68,7 +63,7 @@ O Arasaka Mikoshi também roda **dentro do [Arasaka Central](https://github.com/
 - A configuração e a pasta de dados são as mesmas do app separado (`%APPDATA%\LLM Local\config.json`). Evite abrir os dois ao mesmo tempo: os atalhos ficam com quem abriu primeiro.
 - No Hub, "Iniciar com o Windows" é do Hub (o módulo só liga e desliga a opção dele) e as atualizações do módulo são feitas pelo Hub.
 
-`npm run module` gera `desktop\dist\piphin-module-llm-X.Y.Z.zip`; o `npm run dist` já o gera, e o workflow *Release* o publica junto com o pacote de atualização.
+`npm run module` gera `desktop\dist\piphin-module-llm-X.Y.Z.zip`; o `npm run dist` já o gera, e o `npm run release` o publica junto com o pacote de atualização.
 
 ## Como usar
 
@@ -317,7 +312,7 @@ Em **Configurações → Idioma** escolha a língua do app: **Português (Brasil
 
 ## Testes
 
-`python -m unittest discover -s tests` roda os testes: unidade dos módulos, cliente MCP (com um servidor MCP falso), pixel art (`test_sprites.py`: PNG, fundo, paleta, folhas, escolha do pacote do motor no Linux, conexão com um Construct falso e o servidor MCP da Mikoshi) e integração (o servidor de verdade com um llama-server falso, um stable-diffusion.cpp falso e um Construct falso, sem GPU). `node --test desktop/test/*.test.js` testa o atualizador e `cd desktop && npx electron test/ui-smoke.js` usa a interface de verdade (com o servidor e o motor falsos). No GitHub Actions todos rodam no Windows e no Linux a cada push e antes de cada Release (o workflow **Release** só segue se os **Testes** passarem).
+`python -m unittest discover -s tests` roda os testes: unidade dos módulos, cliente MCP (com um servidor MCP falso), pixel art (`test_sprites.py`: PNG, fundo, paleta, folhas, escolha do pacote do motor no Linux, conexão com um Construct falso e o servidor MCP da Mikoshi) e integração (o servidor de verdade com um llama-server falso, um stable-diffusion.cpp falso e um Construct falso, sem GPU). `node --test desktop/test/*.test.js` testa o atualizador e `cd desktop && npx electron test/ui-smoke.js` usa a interface de verdade (com o servidor e o motor falsos). No GitHub Actions eles rodam no Windows e no Linux só quando alguém pede (Actions → **Testes** → *Run workflow*).
 
 ## Requisitos
 

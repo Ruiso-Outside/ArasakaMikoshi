@@ -11,8 +11,9 @@
     "icon": "electron scripts/make-icons.js icon-source.webp",
     "dist": "electron-builder --win --publish never && node scripts/make-patch.js && node scripts/make-module.js",
     "module": "node scripts/make-module.js",
-    "release": "node scripts/release-check.js",
-    "verify-release": "node scripts/release-check.js --verify",
+    "installer": "electron-builder --win --config electron-builder-nsis.json --publish never",
+    "release": "node scripts/release.js",
+    "verify-release": "node scripts/release.js --verify",
     "module-icon": "electron scripts/make-module-icon.js"
   },
   "build": {

@@ -1,20 +1,13 @@
-# Publica uma versão: tudo é montado aqui no GitHub Actions, a partir da tag vX.Y.Z.
-#   - pela Arasaka Central: Desenvolvedor → Arasaka Mikoshi → Publicar (troca a versão, faz o commit e envia a tag)
-#   - ou à mão: aumente "version" em desktop/package.json, faça o commit e rode  cd desktop && npm run release
-# Monta o .zip portátil, o pacote de atualização (app-patch + patch.json), o módulo da Central e o instalador NSIS,
-# com attestation de todos. O Release nasce como rascunho e só é publicado com todos os arquivos: nem os apps nem a
-# Central veem uma versão pela metade. Sem token no PC e sem depender do Node/antivírus de quem publica.
-# Rodar à mão (workflow_dispatch) com "publicar" desligado só monta e guarda os arquivos (para testar o build).
-name: Release
+# Opcional, só à mão (Actions → Montar → Run workflow): monta e, com "publicar" marcado, publica uma tag já enviada.
+# O caminho normal é publicar do PC (desktop/scripts/release.js), que não gasta créditos do Actions.
+# O arquivo não se chama release.yml de propósito: a Central publicaria a Mikoshi só criando a tag.
+name: Montar
 
 on:
-  push:
-    tags: ["v*"]
-    branches: ["ci/**"]   # branch de teste: monta tudo, sem publicar
   workflow_dispatch:
     inputs:
       tag:
-        description: "Tag (ex.: v1.32.0). Vazio = só montar a versão do package.json, sem publicar"
+        description: "Tag (ex.: v1.33.0). Vazio = só montar a versão do package.json, sem publicar"
         required: false
       publicar:
         description: "Publicar o Release"
@@ -41,7 +34,7 @@ jobs:
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       TAG: ${{ inputs.tag || (github.ref_type == 'tag' && github.ref_name) || '' }}
-      PUBLISH: ${{ (github.event_name == 'push' && github.ref_type == 'tag') || inputs.publicar == true }}
+      PUBLISH: ${{ inputs.publicar == true }}
     steps:
       - uses: actions/checkout@v7
         with:
