@@ -6,6 +6,7 @@
 # Build do app desktop
 desktop/node_modules/
 desktop/dist/
+desktop/dist-nsis/
 
 # Python
 __pycache__/
